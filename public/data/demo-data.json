@@ -1,0 +1,214 @@
+{
+  "metadata": {
+    "version": "1.0",
+    "source": "demo",
+    "generatedAt": "2026-03-09T10:00:00.000Z",
+    "sprintsCount": 12,
+    "note": "Demo data for Vercel - replace with real data"
+  },
+  "totalBugs": 156,
+  "totalSprints": 12,
+  "criticalBugs": 45,
+  "pendingBugs": 12,
+  "bugsClosed": 144,
+  "productionBugs": 18,
+  "testCasesTotal": 2850,
+  "testCasesExecuted": 2691,
+  "testCasesWithExecutions": 2650,
+  "testCasesWithoutExecutions": 200,
+  "testCasesReused": 485,
+  "testCasesUsed": 2200,
+  "testCasesNotUsed": 65,
+  "testCasesReusedRate": 17,
+  "testCasesUsedRate": 77,
+  "testCasesNotUsedRate": 2,
+  "testCasesPlanned": 2950,
+  "testCasesEfficiency": 94.4,
+  "testCasesExecutionRate": 91,
+  "bugsByPriority": {
+    "High": {
+      "count": 45,
+      "pending": 5,
+      "canceled": 2,
+      "resolved": 38
+    },
+    "Medium": {
+      "count": 78,
+      "pending": 4,
+      "canceled": 1,
+      "resolved": 73
+    },
+    "Low": {
+      "count": 33,
+      "pending": 3,
+      "canceled": 0,
+      "resolved": 30
+    }
+  },
+  "bugsByModule": [
+    { "module": "Authentication", "count": 24, "critical": 8 },
+    { "module": "Dashboard", "count": 35, "critical": 12 },
+    { "module": "Reports", "count": 28, "critical": 10 },
+    { "module": "Integration", "count": 32, "critical": 11 },
+    { "module": "API", "count": 37, "critical": 4 }
+  ],
+  "bugsByCategory": [
+    { "category": "Feature", "count": 68 },
+    { "category": "Bug", "count": 52 },
+    { "category": "Performance", "count": 21 },
+    { "category": "Security", "count": 15 }
+  ],
+  "developerData": [
+    { "name": "Tester A", "assigned": 15, "resolved": 14, "pending": 1 },
+    { "name": "Tester B", "assigned": 18, "resolved": 16, "pending": 2 },
+    { "name": "Tester C", "assigned": 12, "resolved": 11, "pending": 1 },
+    { "name": "Tester D", "assigned": 16, "resolved": 15, "pending": 1 }
+  ],
+  "bugsByMonth": {
+    "01-2026": { "count": 12, "critical": 3, "pending": 1 },
+    "02-2026": { "count": 28, "critical": 8, "pending": 3 },
+    "03-2026": { "count": 24, "critical": 7, "pending": 2 }
+  },
+  "testCasesByMonth": {
+    "01-2026": { "executed": 245, "passed": 238, "failed": 7, "notExecuted": 15, "inProgress": 2, "blocked": 0, "planned": 265 },
+    "02-2026": { "executed": 892, "passed": 865, "failed": 27, "notExecuted": 45, "inProgress": 8, "blocked": 2, "planned": 950 },
+    "03-2026": { "executed": 854, "passed": 822, "failed": 32, "notExecuted": 52, "inProgress": 6, "blocked": 1, "planned": 920 }
+  },
+  "bugsByMonthByPriority": {
+    "01-2026": { "High": 3, "Medium": 6, "Low": 3 },
+    "02-2026": { "High": 8, "Medium": 14, "Low": 6 },
+    "03-2026": { "High": 7, "Medium": 12, "Low": 5 }
+  },
+  "executionRateByMonth": {
+    "01-2026": 93.2,
+    "02-2026": 94.1,
+    "03-2026": 92.8
+  },
+  "executionSummary": {
+    "total_executions": 2691,
+    "passed": 1925,
+    "failed": 66,
+    "not_executed": 112,
+    "in_progress": 16,
+    "blocked": 3
+  },
+  "resolutionTimeData": {
+    "High": {
+      "average": 2.5,
+      "min": 0.5,
+      "max": 8.0,
+      "count": 45
+    },
+    "Medium": {
+      "average": 4.2,
+      "min": 1.0,
+      "max": 15.0,
+      "count": 78
+    },
+    "Low": {
+      "average": 6.8,
+      "min": 2.0,
+      "max": 30.0,
+      "count": 33
+    }
+  },
+  "bugResolutionByPriority": {
+    "High": { "resolved": 38, "pending": 5, "canceled": 2, "resolveRate": 84.4 },
+    "Medium": { "resolved": 73, "pending": 4, "canceled": 1, "resolveRate": 93.6 },
+    "Low": { "resolved": 30, "pending": 3, "canceled": 0, "resolveRate": 90.9 }
+  },
+  "sprintData": [
+    {
+      "sprint": "01-2026",
+      "sprint_num": 1,
+      "total": 1,
+      "critical": 0,
+      "pending": 1,
+      "canceled": 0,
+      "bugs": 12,
+      "testCases": 260,
+      "testCasesExecuted": 245,
+      "testCasesPlanned": 265,
+      "criticalBugsPending": 0,
+      "criticalBugsByState": { "tareasPorHacer": 0, "enProgreso": 0, "reabierto": 0 }
+    },
+    {
+      "sprint": "02-2026",
+      "sprint_num": 2,
+      "total": 28,
+      "critical": 8,
+      "pending": 3,
+      "canceled": 0,
+      "bugs": 28,
+      "testCases": 950,
+      "testCasesExecuted": 892,
+      "testCasesPlanned": 950,
+      "criticalBugsPending": 2,
+      "criticalBugsByState": { "tareasPorHacer": 1, "enProgreso": 1, "reabierto": 0 }
+    },
+    {
+      "sprint": "03-2026",
+      "sprint_num": 3,
+      "total": 24,
+      "critical": 7,
+      "pending": 2,
+      "canceled": 0,
+      "bugs": 24,
+      "testCases": 920,
+      "testCasesExecuted": 854,
+      "testCasesPlanned": 920,
+      "criticalBugsPending": 1,
+      "criticalBugsByState": { "tareasPorHacer": 0, "enProgreso": 1, "reabierto": 0 }
+    },
+    {
+      "sprint": "11-2025",
+      "sprint_num": -2,
+      "total": 15,
+      "critical": 4,
+      "pending": 0,
+      "canceled": 0,
+      "bugs": 15,
+      "testCases": 280,
+      "testCasesExecuted": 265,
+      "testCasesPlanned": 290,
+      "criticalBugsPending": 0,
+      "criticalBugsByState": { "tareasPorHacer": 0, "enProgreso": 0, "reabierto": 0 }
+    },
+    {
+      "sprint": "12-2025",
+      "sprint_num": -1,
+      "total": 19,
+      "critical": 6,
+      "pending": 2,
+      "canceled": 0,
+      "bugs": 19,
+      "testCases": 310,
+      "testCasesExecuted": 290,
+      "testCasesPlanned": 320,
+      "criticalBugsPending": 1,
+      "criticalBugsByState": { "tareasPorHacer": 1, "enProgreso": 0, "reabierto": 0 }
+    }
+  ],
+  "summary": {
+    "totalBugs": 156,
+    "bugsClosed": 144,
+    "bugsPending": 12,
+    "criticalBugs": 45,
+    "testCasesTotal": 2850,
+    "testCasesExecuted": 2691,
+    "testCasesPlanned": 2950,
+    "testCasesWithExecutions": 2650,
+    "testCasesWithoutExecutions": 200,
+    "testCasesReused": 485,
+    "testCasesUsed": 2200,
+    "testCasesNotUsed": 65,
+    "testCasesReusedRate": 17,
+    "testCasesUsedRate": 77,
+    "testCasesNotUsedRate": 2,
+    "testCasesPlanned": 2950,
+    "testCasesEfficiency": 94.4,
+    "testCasesExecutionRate": 91,
+    "productionBugs": 18,
+    "avgTestCasesPerMonth": 950
+  }
+}

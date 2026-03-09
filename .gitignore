@@ -22,6 +22,8 @@ archive/
 
 # Local generated QA JSON (now generated in CI / data/)
 public/data/qa-data.json
+# Keep demo-data.json in git - it's the fallback for Vercel production
+!public/data/demo-data.json
 
 # Excel and generated artifacts
 data/*.xlsx
