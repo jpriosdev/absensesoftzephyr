@@ -70,6 +70,7 @@ async function main() {
       bugsByModule: qaData.bugsByModule,
       bugsByCategory: qaData.bugsByCategory,
       developerData: qaData.developerData,
+      testerData: qaData.testerData,  // IMPORTANT: Include testerData for Team Analysis
       sprintData: qaData.sprintData,
       testCasesByMonth: qaData.testCasesByMonth,
       bugsByDate: qaData.bugsByDate,
