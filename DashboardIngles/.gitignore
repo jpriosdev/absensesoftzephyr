@@ -1,0 +1,30 @@
+node_modules/
+.next/
+dist/
+out/
+coverage/
+/.env
+.env.local
+.env.development
+.env.production
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-lock.yaml
+package-lock.json
+.DS_Store
+.vscode/
+.idea/
+*.log
+
+# Local archive of removed/archived files (created by repo maintenance)
+archive/
+
+# Local generated QA JSON (now generated in CI / data/)
+public/data/qa-data.json
+
+# Excel and generated artifacts
+data/*.xlsx
+
+# Backup / legacy scripts that we keep in archive only
+scripts/*.js

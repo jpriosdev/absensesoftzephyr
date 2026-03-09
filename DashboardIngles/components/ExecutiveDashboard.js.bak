@@ -1,0 +1,2357 @@
+// ExecutiveDashboard.js - Refactorizado y alineado
+// Main dashboard component, normalized with SQL/CSV structure
+// Todas las variables, cálculos y referencias actualizadas
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
+import Image from 'next/image';
+import { format } from 'date-fns';
+import { enUS } from 'date-fns/locale';
+import ExecutiveRecommendations from './ExecutiveRecommendations';
+import QualityMetrics from './QualityMetrics';
+import DetailModal from './DetailModal';
+import SprintComparison from './SprintComparison';
+import ActionableRecommendations from './ActionableRecommendations';
+import SettingsMenu from './SettingsMenu';
+import { QADataProcessor } from '../utils/dataProcessor'; // Nueva importación
+import { BarChart3, Target, Users, CheckCircle, Filter, ChevronDown, AlertTriangle, X, Activity, Bug, Clock, TrendingDown, Settings, TrendingUp } from 'lucide-react';
+import KPICard from './KPICard';
+import UnderConstructionCard from './UnderConstructionCard';
+import SprintTrendChart from './SprintTrendChart';
+import ModuleAnalysis from './ModuleAnalysis';
+import DeveloperAnalysis from './DeveloperAnalysis';
+
+export default function ExecutiveDashboard({ 
+  // Original props
+  data: externalData, 
+  lastUpdated: externalLastUpdated, 
+  onRefresh: externalOnRefresh, 
+  loading: externalLoading,
+  
+  // New props for parametric mode
+  dataSource = '/api/qa-data',
+  configSource = '/api/config',
+  refreshInterval = 300000
+}) {
+  // Original states
+  const [activeTab, setActiveTab] = useState('overview');
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  
+  // New states for parametric mode
+  const [parametricData, setParametricData] = useState(null);
+  const [config, setConfig] = useState(null);
+  const [parametricLoading, setParametricLoading] = useState(false);
+  const [parametricLastUpdated, setParametricLastUpdated] = useState(null);
+  const [error, setError] = useState(null);
+  const [recommendations, setRecommendations] = useState(null);
+  const [useParametricMode, setUseParametricMode] = useState(false);
+  const [isEditingLayout, setIsEditingLayout] = useState(false);
+  const [kpiOrder, setKpiOrder] = useState([
+    'cobertura',
+    'matrizRiesgo',
+    'densidad',
+    'bugsCriticos',
+    'criticosPendientes',
+    'tiempoSolucion',
+    'velocidadFixes',
+    'bugLeakage',
+    'completitud',
+    'automatizacion'
+  ]);
+  // Global detail modal state so any tab can open the same modal
+  const [detailModal, setDetailModal] = useState(null);
+
+  // Tooltip state for sprint details (rendered via portal to avoid clipping)
+  const [tooltipInfo, setTooltipInfo] = useState({ visible: false, sprint: null, sprintData: null, rect: null });
+
+  // ===== Global filter state (shared across tabs) =====
+  const [selectedSprints, setSelectedSprints] = useState(['All']);
+  const [stagedSelectedSprints, setStagedSelectedSprints] = useState(selectedSprints);
+  const [testTypeFilter, setTestTypeFilter] = useState('all'); // 'all', 'system', 'uat'
+  const [selectedStatus, setSelectedStatus] = useState(['All']);
+  const [selectedPriorities, setSelectedPriorities] = useState(['All']);
+  const [selectedDevelopers, setSelectedDevelopers] = useState(['All']);
+  const [selectedCategories, setSelectedCategories] = useState(['All']);
+  const [selectedTags, setSelectedTags] = useState(['All']);
+  const [selectedStrategies, setSelectedStrategies] = useState(['All']);
+  const [selectedEnvironments, setSelectedEnvironments] = useState(['All']);
+  const [selectedFixVersions, setSelectedFixVersions] = useState(['All']);
+  const [showFilters, setShowFilters] = useState(true);
+  const [collapsedSections, setCollapsedSections] = useState({ sprint: false, module: false, status: false, priority: false, tag: false, strategy: false, environment: false, fixVersion: false });
+
+  const handleFilterToggle = (filterType, value) => {
+    const setterMap = {
+      sprint: setSelectedSprints,
+      status: setSelectedStatus,
+      priority: setSelectedPriorities,
+      developer: setSelectedDevelopers,
+      category: setSelectedCategories,
+      tag: setSelectedTags,
+      strategy: setSelectedStrategies,
+      environment: setSelectedEnvironments,
+      fixVersion: setSelectedFixVersions
+    };
+
+    const setter = setterMap[filterType];
+    if (!setter) return;
+
+    if (value === 'All') {
+      setter(['All']);
+    } else {
+      setter(prev => {
+        if (prev.includes('All')) return [value];
+        if (prev.includes(value)) {
+          const filtered = prev.filter(v => v !== value);
+          return filtered.length === 0 ? ['All'] : filtered;
+        }
+        return [...prev, value];
+      });
+    }
+  };
+
+  // Generic handler for compact multi-select inputs
+  const handleMultiSelectChange = (filterType, e) => {
+    const setterMap = {
+      sprint: setSelectedSprints,
+      status: setSelectedStatus,
+      priority: setSelectedPriorities,
+      developer: setSelectedDevelopers,
+      category: setSelectedCategories,
+      tag: setSelectedTags,
+      strategy: setSelectedStrategies,
+      environment: setSelectedEnvironments,
+      fixVersion: setSelectedFixVersions
+    };
+    const setter = setterMap[filterType];
+    if (!setter) return;
+
+    const values = Array.from(e.target.selectedOptions).map(o => o.value);
+    if (values.includes('All') || values.length === 0) {
+      setter(['All']);
+    } else {
+      setter(values.filter(v => v !== 'All'));
+    }
+  };
+
+  // Wrapper for sprint toggle to keep compatibility with XTemporal design
+  const handleSprintToggle = (sprint) => handleFilterToggle('sprint', sprint);
+
+  // Keep staged sprint selection in sync when committed externally
+  useEffect(() => {
+    setStagedSelectedSprints(selectedSprints);
+  }, [selectedSprints]);
+
+  const showSprintTooltip = (e, sprintKey, sprintData) => {
+    try {
+      const rect = e.currentTarget.getBoundingClientRect();
+      setTooltipInfo({ visible: true, sprint: sprintKey, sprintData, rect });
+    } catch (err) {
+      // ignore
+    }
+  };
+
+  const hideSprintTooltip = () => {
+    setTooltipInfo({ visible: false, sprint: null, sprintData: null, rect: null });
+  };
+
+  
+
+  // Determinar qué datos usar
+  const isParametricMode = useParametricMode && !externalData;
+  const currentData = isParametricMode ? parametricData : externalData;
+  const currentLoading = isParametricMode ? parametricLoading : externalLoading;
+  const currentLastUpdated = isParametricMode ? parametricLastUpdated : externalLastUpdated;
+
+  // Cargar configuración para modo paramétrico
+  const loadConfiguration = useCallback(async () => {
+    try {
+      const response = await fetch(configSource);
+      if (response.ok) {
+        const configData = await response.json();
+
+        // If there's a locally persisted config (e.g. user saved but server doesn't accept POST), merge it so local toggles take precedence
+        let finalConfig = configData;
+        try {
+          if (typeof window !== 'undefined') {
+            const persisted = localStorage.getItem('qa-config');
+            if (persisted) {
+              const parsed = JSON.parse(persisted);
+              finalConfig = { ...configData, ...parsed };
+            }
+          }
+        } catch (e) {
+          console.warn('Failed to merge persisted config:', e);
+        }
+
+        setConfig(finalConfig);
+
+        // Aplicar configuración de auto-refresh si existe
+        if (finalConfig.autoRefresh !== undefined) {
+          setAutoRefresh(finalConfig.autoRefresh);
+        }
+
+        // Aplicar configuración de modo paramétrico si existe
+        if (finalConfig.useParametricMode !== undefined) {
+          setUseParametricMode(finalConfig.useParametricMode);
+        }
+        return;
+      }
+
+      // If response not ok, try to load from localStorage as a fallback
+      if (typeof window !== 'undefined') {
+        const persisted = localStorage.getItem('qa-config');
+        if (persisted) {
+          const configData = JSON.parse(persisted);
+          setConfig(configData);
+          if (configData.autoRefresh !== undefined) setAutoRefresh(configData.autoRefresh);
+          if (configData.useParametricMode !== undefined) setUseParametricMode(configData.useParametricMode);
+          return;
+        }
+      }
+
+      // Last resort: defaults
+      console.warn('Using default configuration: remote not available');
+      setConfig({
+        autoRefresh: true,
+        refreshInterval: 300000,
+        useParametricMode: true,
+        weights: {
+          resolutionRate: 0.3,
+          testCoverage: 0.25,
+          bugDensity: 0.2,
+          criticalBugs: 0.25
+        },
+        thresholds: {
+          criticalBugsAlert: 20,
+          maxBugsDeveloper: 15,
+          criticalModulePercentage: 60
+        }
+      });
+    } catch (error) {
+      // Network or parse error: try localStorage fallback
+      try {
+        if (typeof window !== 'undefined') {
+          const persisted = localStorage.getItem('qa-config');
+          if (persisted) {
+            const configData = JSON.parse(persisted);
+            setConfig(configData);
+            if (configData.autoRefresh !== undefined) setAutoRefresh(configData.autoRefresh);
+            if (configData.useParametricMode !== undefined) setUseParametricMode(configData.useParametricMode);
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to load persisted config:', e);
+      }
+
+      console.warn('Using default configuration:', error);
+      setConfig({
+        autoRefresh: true,
+        refreshInterval: 300000,
+        useParametricMode: true,
+        weights: {
+          resolutionRate: 0.3,
+          testCoverage: 0.25,
+          bugDensity: 0.2,
+          criticalBugs: 0.25
+        },
+        thresholds: {
+          criticalBugsAlert: 20,
+          maxBugsDeveloper: 15,
+          criticalModulePercentage: 60
+        }
+      });
+    }
+  }, [configSource]);
+
+  useEffect(() => {
+    loadConfiguration();
+    // Listen for config updates issued elsewhere in the app and reload
+    const onConfigUpdated = () => loadConfiguration();
+    if (typeof window !== 'undefined') {
+      window.addEventListener('config:updated', onConfigUpdated);
+    }
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('config:updated', onConfigUpdated);
+      }
+    };
+  }, [loadConfiguration]);
+
+  // If no external data is provided, enable parametric mode by default
+  useEffect(() => {
+    if (!externalData) {
+      setUseParametricMode(true);
+    }
+  }, [externalData]);
+
+  // Load recommendations on mount
+  useEffect(() => {
+    loadRecommendations();
+  }, []);
+
+  
+
+  
+
+  // Auto-refresh mejorado
+  useEffect(() => {
+    if (!autoRefresh) return;
+
+    const interval = setInterval(() => {
+      if (isParametricMode) {
+        loadParametricData();
+      } else if (externalOnRefresh) {
+        externalOnRefresh();
+      }
+    }, refreshInterval);
+
+    return () => clearInterval(interval);
+  }, [autoRefresh, isParametricMode, externalOnRefresh, refreshInterval, dataSource, config]);
+
+  // Cargar datos paramétricos cuando hay configuración
+  useEffect(() => {
+    if (isParametricMode && config) {
+      loadParametricData();
+    }
+  }, [isParametricMode, config, dataSource]);
+
+  
+
+  async function loadParametricData() {
+    setParametricLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(dataSource);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const rawData = await response.json();
+
+      if (rawData && config) {
+        // Usar el nuevo procesador con configuración
+        const processedData = QADataProcessor.processQAData(rawData, config);
+        setParametricData(processedData);
+        setParametricLastUpdated(new Date());
+      }
+    } catch (error) {
+      console.error('Error loading parametric data:', error);
+      setError(error.message);
+    } finally {
+      setParametricLoading(false);
+    }
+  }
+
+  async function loadRecommendations() {
+    try {
+      const response = await fetch('/api/recommendations');
+      if (response.ok) {
+        const data = await response.json();
+        setRecommendations(data);
+        console.log('✅ Recommendations loaded from file');
+      } else {
+        console.warn('Could not load recommendations, using default values');
+      }
+    } catch (error) {
+      console.warn('Error loading recommendations:', error);
+      // Do not set error because recommendations are optional
+    }
+  }
+
+  const handleRefresh = () => {
+    if (isParametricMode) {
+      loadParametricData();
+    } else if (externalOnRefresh) {
+      externalOnRefresh();
+    }
+  };
+
+  if (!currentData && !currentLoading) {
+    return (
+      <>
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+          <div className="text-center">
+            <div className="text-gray-400 text-xl mb-4">📊</div>
+            <p className="text-gray-600 mb-4">No data available</p>
+            <button 
+              onClick={handleRefresh}
+              className="px-4 py-2 bg-executive-600 text-white rounded-lg hover:bg-executive-700"
+            >
+              Load Data
+            </button>
+          </div>
+        </div>
+
+        {/* (tooltip portal removed from no-data branch; rendered in main view) */}
+      </>
+    );
+  }
+
+  if (!currentData) return null;
+
+  const { kpis, summary, alerts } = currentData;
+
+  // Derived lists are computed from `filteredData` below so they update dynamically
+
+  // Helper to classify sprint test type (reuse light logic from OverviewTab)
+  const classifyTestType = (sprint) => {
+    if (!sprint) return 'system';
+    if (sprint.testType) return sprint.testType;
+    const tags = (sprint.tags || '').toLowerCase();
+    if (tags.includes('uat') || tags.includes('equipo')) return 'uat';
+    if (tags.includes('integración') || tags.includes('smoke')) return 'system';
+    return 'system';
+  };
+
+  // Apply global filters to currentData and return a filtered copy
+  const applyGlobalFilters = (data) => {
+    if (!data) return data;
+
+    const normalize = v => (v || '').toString().trim().toLowerCase();
+    const selectedStatusSet = new Set(selectedStatus.map(s => normalize(s)));
+    const selectedPrioritiesSet = new Set(selectedPriorities.map(s => normalize(s)));
+    const selectedDevelopersSet = new Set(selectedDevelopers.map(s => normalize(s)));
+    const selectedCategoriesSet = new Set(selectedCategories.map(s => normalize(s)));
+    const selectedStrategiesSet = new Set(selectedStrategies.map(s => normalize(s)));
+    const selectedEnvironmentsSet = new Set(selectedEnvironments.map(s => normalize(s)));
+    const selectedFixVersionsSet = new Set(selectedFixVersions.map(s => normalize(s)));
+    const selectedTagsLower = selectedTags.map(s => normalize(s)).filter(s => s !== 'all');
+
+    const bugs = (data.bugs || []).filter(b => {
+      // Status
+      if (!selectedStatus.includes('All')) {
+        if (!selectedStatusSet.has(normalize(b.status || b.estado || b.status))) return false;
+      }
+      // Priority
+      if (!selectedPriorities.includes('All')) {
+        if (!selectedPrioritiesSet.has(normalize(b.priority || b.prioridad || ''))) return false;
+      }
+      // Developer
+      if (!selectedDevelopers.includes('All')) {
+        if (!selectedDevelopersSet.has(normalize(b.developer || b.developer_name || ''))) return false;
+      }
+      // Category
+      if (!selectedCategories.includes('All')) {
+        if (!selectedCategoriesSet.has(normalize(b.category || b.categoria || ''))) return false;
+      }
+      // Tags (case-insensitive)
+      if (selectedTagsLower.length > 0) {
+        const collectTags = [];
+        const push = v => {
+          if (!v && v !== 0) return;
+          if (Array.isArray(v)) v.forEach(x=>x && collectTags.push(x.toString().trim().toLowerCase()));
+          else if (typeof v === 'string') v.split(/[;,|]/).map(x=>x.trim()).filter(Boolean).forEach(x=>collectTags.push(x.toLowerCase()));
+        };
+        push(b.tag0 || b.Tag0 || b.tag || b.tags);
+        push(b.tag1 || b.Tag1);
+        push(b.tag2 || b.Tag2);
+        if (!selectedTagsLower.some(st => collectTags.includes(st))) return false;
+      }
+      // Execution strategy
+      if (!selectedStrategies.includes('All')) {
+        const strat = normalize(b.executionStrategy || b.strategy || b['Estrategia de ejecución'] || '');
+        if (!selectedStrategiesSet.has(strat)) return false;
+      }
+      // Environment
+      if (!selectedEnvironments.includes('All')) {
+        const env = normalize(b.environment || b.ambiente || '');
+        if (!selectedEnvironmentsSet.has(env)) return false;
+      }
+      // Fix version
+      if (!selectedFixVersions.includes('All')) {
+        const fv = normalize(b.fixVersion || b['Version de correccion 1'] || b.fixedVersion || '');
+        if (!selectedFixVersionsSet.has(fv)) return false;
+      }
+      return true;
+    });
+
+    // Filter sprintData by selectedSprints and testTypeFilter
+    let sprintData = data.sprintData || [];
+    const selectedSprintsSet = new Set(selectedSprints.map(s => (s || '').toString()));
+    if (!selectedSprints.includes('All')) {
+      sprintData = sprintData.filter(s => selectedSprintsSet.has(((s.sprint || s.name || s.id) || '').toString()));
+    }
+    if (testTypeFilter !== 'all') {
+      sprintData = sprintData.filter(s => classifyTestType(s) === testTypeFilter);
+    }
+
+    // Further filter sprintData by other selected filters so KPIs and charts respond
+    const selectedTagsLowerLocal = selectedTags.map(s => normalize(s)).filter(s => s !== 'all');
+    const sprintMatches = (s) => {
+      // Tags on sprint (string or array)
+      if (selectedTagsLowerLocal.length > 0) {
+        const sTagsRaw = s.tags || s.tag || s.tagsList || '';
+        let sTags = [];
+        if (Array.isArray(sTagsRaw)) sTags = sTagsRaw.map(x => normalize(x));
+        else if (typeof sTagsRaw === 'string') sTags = sTagsRaw.split(/[;,|]/).map(x => normalize(x)).filter(Boolean);
+        if (!selectedTagsLowerLocal.some(t => sTags.includes(t))) return false;
+      }
+
+      // Strategy
+      if (!selectedStrategies.includes('All')) {
+        const strat = normalize(s.executionStrategy || s.strategy || s['Estrategia de ejecución'] || s.strategyName || '');
+        if (!selectedStrategiesSet.has(strat)) return false;
+      }
+
+      // Environment
+      if (!selectedEnvironments.includes('All')) {
+        const env = normalize(s.environment || s.ambiente || s.env || '');
+        if (!selectedEnvironmentsSet.has(env)) return false;
+      }
+
+      // Fix version / version
+      if (!selectedFixVersions.includes('All')) {
+        const fv = normalize(s.fixVersion || s.version || s['Version de correccion 1'] || s.release || '');
+        if (!selectedFixVersionsSet.has(fv)) return false;
+      }
+
+      return true;
+    };
+
+    if (sprintData && sprintData.length > 0) {
+      sprintData = sprintData.filter(sprintMatches);
+    }
+
+    return { ...data, bugs, sprintData };
+  };
+
+  const filteredData = applyGlobalFilters(currentData);
+
+  // Recompute filter option lists from the filtered data so options are dynamic
+  const sprintList = (filteredData.sprintData || [])
+    .map(s => ((s.sprint || s.name || s.id) || '').toString())
+    .filter(Boolean);
+
+  const bugsArray = Array.isArray(filteredData.bugs) ? filteredData.bugs : [];
+
+  // Modules
+  let moduleList = [];
+  if (bugsArray.length > 0) {
+    moduleList = Array.from(new Set(bugsArray.map(b => (b.module || 'Other').toString().trim()))).filter(Boolean).sort();
+  } else if (Array.isArray(filteredData.bugsByModule) && filteredData.bugsByModule.length > 0) {
+    moduleList = Array.from(new Set(filteredData.bugsByModule.map(m => (m.module || m.name || m[0] || '').toString().trim()))).filter(Boolean).sort();
+  }
+
+  // Priorities
+  let priorityList = [];
+  if (bugsArray.length > 0) {
+    priorityList = Array.from(new Set(bugsArray.map(b => (b.priority || 'No priority').toString().trim()))).filter(Boolean).sort((a,b)=> a.localeCompare(b));
+  } else if (filteredData.bugsByPriority && typeof filteredData.bugsByPriority === 'object') {
+    priorityList = Object.keys(filteredData.bugsByPriority || {}).filter(Boolean).sort((a,b)=> a.localeCompare(b));
+  }
+
+  // Status
+  let statusList = [];
+  if (bugsArray.length > 0) {
+    statusList = Array.from(new Set(bugsArray.map(b => (b.status || 'Unknown').toString().trim()))).filter(Boolean).sort((a,b)=> a.localeCompare(b));
+  }
+  // Fallback: if no bug-level data, use server-extracted status list
+  if (statusList.length === 0 && filteredData && Array.isArray(filteredData._statusList) && filteredData._statusList.length > 0) {
+    statusList = Array.from(new Set(filteredData._statusList)).filter(Boolean).sort((a,b)=>a.localeCompare(b));
+  }
+
+  // Developers
+  let developerList = [];
+  if (bugsArray.length > 0) {
+    developerList = Array.from(new Set(bugsArray.map(b => (b.developer || 'Unassigned').toString().trim()))).filter(Boolean).sort((a,b)=> a.localeCompare(b));
+  } else if (Array.isArray(filteredData.developerData) && filteredData.developerData.length > 0) {
+    developerList = Array.from(new Set(filteredData.developerData.map(d => (d.developer_name || d.name || d[0] || '').toString().trim()))).filter(Boolean).sort((a,b)=> a.localeCompare(b));
+  }
+
+  // Categories
+  let categoryList = [];
+  if (bugsArray.length > 0) {
+    categoryList = Array.from(new Set(bugsArray.map(b => (b.category || 'Uncategorized').toString().trim()))).filter(Boolean).sort((a,b)=>a.localeCompare(b));
+  } else if (filteredData.bugsByCategory && Array.isArray(filteredData.bugsByCategory) && filteredData.bugsByCategory.length > 0) {
+    categoryList = Array.from(new Set(filteredData.bugsByCategory.map(c => (c.category || c.name || c[0] || '').toString().trim()))).filter(Boolean).sort((a,b)=>a.localeCompare(b));
+  }
+
+  // Dynamic derived lists for suggested filters (tags/strategy/environment/fixVersion)
+  const tagCandidates = new Set();
+  if (bugsArray.length > 0) {
+    bugsArray.forEach(b => {
+      const collect = (v) => {
+        if (!v && v !== 0) return;
+        if (Array.isArray(v)) v.forEach(x => x && tagCandidates.add(x.toString().trim()));
+        else if (typeof v === 'string') {
+          v.split(/[;,|]/).map(x => x.trim()).filter(Boolean).forEach(x => tagCandidates.add(x));
+        }
+      };
+      collect(b.tag0 || b.Tag0 || b.tag || b.tags);
+      collect(b.tag1 || b.Tag1);
+      collect(b.tag2 || b.Tag2);
+    });
+  }
+  const tagList = Array.from(tagCandidates).sort((a,b)=>a.localeCompare(b));
+
+  let strategyList = [];
+  let environmentList = [];
+  let fixVersionList = [];
+  if (bugsArray.length > 0) {
+    strategyList = Array.from(new Set(bugsArray.map(b => (b.executionStrategy || b.strategy || b['Estrategia de ejecución'] || '').toString().trim()).filter(Boolean))).sort((a,b)=>a.localeCompare(b));
+    environmentList = Array.from(new Set(bugsArray.map(b => (b.environment || b.ambiente || '').toString().trim()).filter(Boolean))).sort((a,b)=>a.localeCompare(b));
+    fixVersionList = Array.from(new Set(bugsArray.map(b => (b.fixVersion || b['Version de correccion 1'] || b.fixedVersion || '').toString().trim()).filter(Boolean))).sort((a,b)=>a.localeCompare(b));
+  }
+
+  // Fallback: if no tags found from bugs, use server-provided extraction (_tagList)
+  if (tagList.length === 0 && filteredData && Array.isArray(filteredData._tagList) && filteredData._tagList.length > 0) {
+    tagList.push(...filteredData._tagList);
+  }
+  // Fallbacks for strategy/environment/fixVersion from server-provided lists
+  if (strategyList.length === 0 && filteredData && Array.isArray(filteredData._strategyList) && filteredData._strategyList.length > 0) {
+    strategyList.push(...filteredData._strategyList);
+  }
+  if (environmentList.length === 0 && filteredData && Array.isArray(filteredData._environmentList) && filteredData._environmentList.length > 0) {
+    environmentList.push(...filteredData._environmentList);
+  }
+  if (fixVersionList.length === 0 && filteredData && Array.isArray(filteredData._fixVersionList) && filteredData._fixVersionList.length > 0) {
+    fixVersionList.push(...filteredData._fixVersionList);
+  }
+
+  const tabs = [
+    { id: 'overview', label: 'Executive Summary', icon: <BarChart3 className="w-4 h-4" /> },
+    { id: 'quality', label: 'Quality Metrics', icon: <Target className="w-4 h-4" /> },
+    { id: 'teams', label: 'Team Analysis', icon: <Users className="w-4 h-4" /> },
+    { id: 'roadmap', label: 'Roadmap', icon: <CheckCircle className="w-4 h-4" /> }
+  ];
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-[#f8f6fd] via-white to-[#f8f6fd]">
+      {/* Sprint tooltip portal (rendered at document.body) */}
+      {typeof document !== 'undefined' && tooltipInfo.visible && tooltipInfo.rect && createPortal(
+        <div
+          style={{
+            position: 'fixed',
+            left: Math.max(8, tooltipInfo.rect.left),
+            top: tooltipInfo.rect.bottom + 8,
+            zIndex: 9999,
+            width: 260,
+          }}
+        >
+          <div className="bg-gray-900 text-white text-xs rounded-md p-2 shadow-lg">
+            <div className="font-semibold mb-1">{tooltipInfo.sprint}</div>
+            {tooltipInfo.sprintData ? (
+              <div className="text-xs space-y-1">
+                <div>📅 {tooltipInfo.sprintData.startDate || 'N/A'}</div>
+                <div>💻 {tooltipInfo.sprintData.version || 'N/A'}</div>
+                <div>🌎 {tooltipInfo.sprintData.environment || 'N/A'}</div>
+                <div>🏷️ {tooltipInfo.sprintData.tags || 'N/A'}</div>
+                <div className="border-t border-gray-700 pt-1 mt-1">🐞 {tooltipInfo.sprintData.bugs || 0} • 🧪 {tooltipInfo.sprintData.testCases || 0}</div>
+              </div>
+            ) : (
+              <div className="text-xs">No additional information</div>
+            )}
+          </div>
+        </div>
+      , document.body)}
+      {/* Header mejorado con branding */}
+      <div className="bg-white/90 backdrop-blur-md shadow-lg border-b sticky top-0 z-40" style={{ borderColor: '#e0e0e0' }}>
+        <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-20">
+            {/* Logo y Título */}
+            <div className="flex items-center space-x-6">
+              {/* Logo Tiendas 3B */}
+              <div className="flex-shrink-0">
+                <Image
+                  src="/abstracta.png"
+                  alt="Abstracta.us"
+                  width={50}
+                  height={50}
+                  className="h-15 w-auto"
+                />
+              </div>
+              
+              {/* Separador */}
+              <div className="hidden md:block h-12 w-px bg-gradient-to-b from-transparent via-slate-300 to-transparent"></div>
+              
+              {/* Título */}
+              <div>
+                <div className="flex items-center space-x-3">
+                  <h1 className="text-2xl font-bold" style={{ color: '#754bde' }}>
+                    QA Executive Dashboard
+                  </h1>
+                  {/* Modo Paramétrico - Oculto temporalmente */}
+                  {false && isParametricMode && (
+                    <span className="px-3 py-1 bg-gradient-to-r from-blue-500 to-blue-600 text-white text-xs font-semibold rounded-full shadow-sm">
+                      Modo Paramétrico
+                    </span>
+                  )}
+                </div>
+                <p className="text-sm font-medium mt-0.5" style={{ color: '#80868d' }}>
+                  Quality Control and Test Process Traceability
+                </p>
+              </div>
+            </div>
+            
+            <div className="flex items-center space-x-6">
+              {/* Indicador de error */}
+              {error && (
+                <div className="flex items-center px-3 py-1.5 bg-red-50 border border-red-200 rounded-lg text-red-700">
+                  <AlertTriangle className="w-4 h-4 mr-2" />
+                  <span className="text-xs font-medium">Connection Error</span>
+                </div>
+              )}
+              
+              {/* Última actualización */}
+              <div className="text-right hidden sm:block">
+                <p className="text-xs text-slate-500 font-medium">Last reported incident</p>
+                <p className="text-sm font-semibold text-slate-900 mt-0.5">
+                  {currentLastUpdated ? format(currentLastUpdated, 'MM/dd/yyyy HH:mm', { locale: enUS }) : 'Not reported'}
+                </p>
+              </div>
+              
+              <SettingsMenu 
+                onRefresh={handleRefresh}
+                loading={currentLoading}
+              />
+              {/* Toggle global filters visibility */}
+              <button
+                onClick={() => {
+                  setShowFilters(prev => {
+                    try { if (typeof window !== 'undefined') localStorage.setItem('qa-show-filters', JSON.stringify(!prev)); } catch(e) {}
+                    return !prev;
+                  });
+                }}
+                className="ml-3 inline-flex items-center px-3 py-1.5 bg-white border rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                <Filter className="w-4 h-4 mr-2" />
+                {showFilters ? 'Hide filters' : 'Show filters'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+          {/* Filtro Moderno Estilo DashboardDemo */}
+          {/* Encabezado con gradiente */}
+          <div 
+            onClick={() => setShowFilters(!showFilters)}
+            className="bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 rounded-t-lg p-3 text-white flex items-center justify-between cursor-pointer hover:shadow-md transition-shadow mb-0"
+          >
+            <div className="flex items-center gap-2">
+              <Filter />
+              <h2 className="text-sm font-bold">Filters</h2>
+              {(() => {
+                const activeFilters = 
+                  (selectedStatus[0] !== 'All' ? selectedStatus.length : 0) +
+                  (selectedPriorities[0] !== 'All' ? selectedPriorities.length : 0) +
+                  (selectedCategories[0] !== 'All' ? selectedCategories.length : 0) +
+                  (selectedTags[0] !== 'All' ? selectedTags.length : 0) +
+                  (selectedStrategies[0] !== 'All' ? selectedStrategies.length : 0) +
+                  (selectedEnvironments[0] !== 'All' ? selectedEnvironments.length : 0);
+                return activeFilters > 0 ? (
+                  <span className="bg-white bg-opacity-20 px-2 py-1 rounded-full text-xs font-semibold">
+                    {activeFilters} active{activeFilters > 1 ? 's' : ''}
+                  </span>
+                ) : null;
+              })()}
+            </div>
+            <div className="flex items-center gap-2">
+              {(() => {
+                const activeFilters = 
+                  (selectedStatus[0] !== 'All' ? selectedStatus.length : 0) +
+                  (selectedPriorities[0] !== 'All' ? selectedPriorities.length : 0) +
+                  (selectedCategories[0] !== 'All' ? selectedCategories.length : 0) +
+                  (selectedTags[0] !== 'All' ? selectedTags.length : 0) +
+                  (selectedStrategies[0] !== 'All' ? selectedStrategies.length : 0) +
+                  (selectedEnvironments[0] !== 'All' ? selectedEnvironments.length : 0);
+                return activeFilters > 0 ? (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedStatus(['All']);
+                      setSelectedPriorities(['All']);
+                      setSelectedCategories(['All']);
+                      setSelectedTags(['All']);
+                      setSelectedStrategies(['All']);
+                      setSelectedEnvironments(['All']);
+                    }}
+                    className="flex items-center gap-1 px-2 py-1 bg-white bg-opacity-20 hover:bg-opacity-30 rounded text-xs font-semibold transition-all"
+                  >
+                    <X size={14} />
+                    Clear
+                  </button>
+                ) : null;
+              })()}
+              <ChevronDown 
+                size={18} 
+                className={`transform transition-transform ${showFilters ? 'rotate-180' : ''}`}
+              />
+            </div>
+          </div>
+
+          {/* Grid de Filtros - Colapsable */}
+          {showFilters && (
+            <div className="bg-gray-50 rounded-b-lg p-4 border border-gray-200 border-t-0 mb-6">
+              <div className="flex gap-2 overflow-x-auto py-2">
+                {/* Module filter removed as requested */}
+
+                {/* Sprint Filter Section (added) */}
+                <div className="border rounded-lg p-1 bg-indigo-50 border-indigo-200 flex-shrink-0 w-44">
+                  <button
+                    onClick={() => setCollapsedSections(prev => ({...prev, sprint: !prev.sprint}))}
+                    className="w-full flex items-center justify-between mb-2"
+                  >
+                    <div className="flex items-center gap-1">
+                      <span className="text-lg">📅</span>
+                      <p className="font-bold uppercase text-xs">Sprint</p>
+                      {selectedSprints.length > 0 && selectedSprints[0] !== 'All' && (
+                        <span className="ml-1 px-1 py-0.5 bg-white bg-opacity-50 text-xs font-bold rounded-sm">
+                          {selectedSprints.length}
+                        </span>
+                      )}
+                    </div>
+                    <ChevronDown size={14} className={`transition-transform flex-shrink-0 ${collapsedSections.sprint ? '' : 'rotate-180'}`} />
+                  </button>
+
+                  {!collapsedSections.sprint && (
+                    <div>
+                      {sprintList.length === 0 ? (
+                        <div className="text-xs text-gray-500 px-2 py-1">No values</div>
+                      ) : (
+                        <>
+                          <select
+                            multiple
+                            size={Math.min(6, Math.max(3, sprintList.length))}
+                            value={stagedSelectedSprints}
+                            onChange={(e) => {
+                              const values = Array.from(e.target.selectedOptions).map(o => o.value);
+                              if (values.includes('All') || values.length === 0) {
+                                setStagedSelectedSprints(['All']);
+                              } else {
+                                setStagedSelectedSprints(values.filter(v => v !== 'All'));
+                              }
+                            }}
+                            className="w-full text-xs p-0.5 rounded-sm border bg-white"
+                          >
+                            <option value="All">All</option>
+                            {sprintList.map(s => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                          <div className="flex gap-2 mt-2">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setSelectedSprints(stagedSelectedSprints); }}
+                              className="text-xs px-2 py-1 bg-indigo-600 text-white rounded-sm"
+                            >
+                              Apply
+                            </button>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setStagedSelectedSprints(selectedSprints); }}
+                              className="text-xs px-2 py-1 bg-white border rounded-sm"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Priority Filter Section */}
+                <div className="border rounded-lg p-1 bg-orange-50 border-orange-200 flex-shrink-0 w-44">
+                  <button
+                    onClick={() => setCollapsedSections(prev => ({...prev, priority: !prev.priority}))}
+                    className="w-full flex items-center justify-between mb-2"
+                  >
+                    <div className="flex items-center gap-1">
+                      <span className="text-lg">⚡</span>
+                      <p className="font-bold uppercase text-xs">Priority</p>
+                      {selectedPriorities.length > 0 && selectedPriorities[0] !== 'All' && (
+                        <span className="ml-1 px-1 py-0.5 bg-white bg-opacity-50 text-xs font-bold rounded-sm">
+                          {selectedPriorities.length}
+                        </span>
+                      )}
+                    </div>
+                    <ChevronDown size={14} className={`transition-transform flex-shrink-0 ${collapsedSections.priority ? '' : 'rotate-180'}`} />
+                  </button>
+
+                  {!collapsedSections.priority && (
+                    <div>
+                      {priorityList.length === 0 ? (
+                        <div className="text-xs text-gray-500 px-2 py-1">No values</div>
+                      ) : (
+                        <select
+                          multiple
+                          size={Math.min(6, Math.max(3, priorityList.length))}
+                          value={selectedPriorities}
+                          onChange={(e) => handleMultiSelectChange('priority', e)}
+                          className="w-full text-xs p-0.5 rounded-sm border bg-white"
+                        >
+                          <option value="All">All</option>
+                          {priorityList.map(p => <option key={p} value={p}>{p}</option>)}
+                        </select>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Status Filter Section */}
+                <div className="border rounded-lg p-1 bg-green-50 border-green-200 flex-shrink-0 w-44">
+                  <button
+                    onClick={() => setCollapsedSections(prev => ({...prev, status: !prev.status}))}
+                    className="w-full flex items-center justify-between mb-2"
+                  >
+                    <div className="flex items-center gap-1">
+                      <span className="text-lg">✓</span>
+                      <p className="font-bold uppercase text-xs">Status</p>
+                      {selectedStatus.length > 0 && selectedStatus[0] !== 'All' && (
+                        <span className="ml-1 px-1 py-0.5 bg-white bg-opacity-50 text-xs font-bold rounded-sm">
+                          {selectedStatus.length}
+                        </span>
+                      )}
+                    </div>
+                    <ChevronDown size={14} className={`transition-transform flex-shrink-0 ${collapsedSections.status ? '' : 'rotate-180'}`} />
+                  </button>
+
+                  {!collapsedSections.status && (
+                      <div>
+                        {statusList.length === 0 ? (
+                          <div className="text-xs text-gray-500 px-2 py-1">No values</div>
+                        ) : (
+                          <select
+                              multiple
+                              size={Math.min(6, Math.max(3, statusList.length))}
+                              value={selectedStatus}
+                              onChange={(e) => handleMultiSelectChange('status', e)}
+                              className="w-full text-xs p-0.5 rounded-sm border bg-white"
+                            >
+                            <option value="All">All</option>
+                            {statusList.map(s => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                        )}
+                      </div>
+                  )}
+                </div>
+                {/* Developer filter removed per request */}
+
+                {/* Tags Filter Section */}
+                <div className="border rounded-lg p-1 bg-purple-50 border-purple-200 flex-shrink-0 w-44">
+                  <button
+                    onClick={() => setCollapsedSections(prev => ({...prev, tag: !prev.tag}))}
+                    className="w-full flex items-center justify-between mb-2"
+                  >
+                    <div className="flex items-center gap-1">
+                      <span className="text-lg">🏷️</span>
+                      <p className="font-bold uppercase text-xs">Tags</p>
+                      {selectedTags.length > 0 && selectedTags[0] !== 'All' && (
+                        <span className="ml-1 px-1 py-0.5 bg-white bg-opacity-50 text-xs font-bold rounded-sm">
+                          {selectedTags.length}
+                        </span>
+                      )}
+                    </div>
+                    <ChevronDown size={14} className={`transition-transform flex-shrink-0 ${collapsedSections.tag ? '' : 'rotate-180'}`} />
+                  </button>
+
+                  {!collapsedSections.tag && (
+                    <div>
+                      {tagList.length === 0 ? (
+                        <div className="text-xs text-gray-500 px-2 py-1">No values</div>
+                      ) : (
+                        <select
+                          multiple
+                          size={Math.min(6, Math.max(3, tagList.length))}
+                          value={selectedTags}
+                          onChange={(e) => handleMultiSelectChange('tag', e)}
+                          className="w-full text-xs p-0.5 rounded-sm border bg-white"
+                        >
+                          <option value="All">All</option>
+                          {tagList.map(t => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Strategy Filter Section */}
+                <div className="border rounded-lg p-1 bg-yellow-50 border-yellow-200 flex-shrink-0 w-44">
+                  <button
+                    onClick={() => setCollapsedSections(prev => ({...prev, strategy: !prev.strategy}))}
+                    className="w-full flex items-center justify-between mb-2"
+                  >
+                    <div className="flex items-center gap-1">
+                      <span className="text-lg">🧭</span>
+                      <p className="font-bold uppercase text-xs">Strategy</p>
+                      {selectedStrategies.length > 0 && selectedStrategies[0] !== 'All' && (
+                        <span className="ml-1 px-1 py-0.5 bg-white bg-opacity-50 text-xs font-bold rounded-sm">
+                          {selectedStrategies.length}
+                        </span>
+                      )}
+                    </div>
+                    <ChevronDown size={14} className={`transition-transform flex-shrink-0 ${collapsedSections.strategy ? '' : 'rotate-180'}`} />
+                  </button>
+
+                  {!collapsedSections.strategy && (
+                    <div>
+                      {strategyList.length === 0 ? (
+                        <div className="text-xs text-gray-500 px-2 py-1">No values</div>
+                      ) : (
+                        <select
+                          multiple
+                          size={Math.min(6, Math.max(3, strategyList.length))}
+                          value={selectedStrategies}
+                          onChange={(e) => handleMultiSelectChange('strategy', e)}
+                          className="w-full text-xs p-0.5 rounded-sm border bg-white"
+                        >
+                          <option value="All">All</option>
+                          {strategyList.map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Environment Filter Section */}
+                <div className="border rounded-lg p-1 bg-emerald-50 border-emerald-200 flex-shrink-0 w-44">
+                  <button
+                    onClick={() => setCollapsedSections(prev => ({...prev, environment: !prev.environment}))}
+                    className="w-full flex items-center justify-between mb-2"
+                  >
+                    <div className="flex items-center gap-1">
+                      <span className="text-lg">🌎</span>
+                      <p className="font-bold uppercase text-xs">Environment</p>
+                      {selectedEnvironments.length > 0 && selectedEnvironments[0] !== 'All' && (
+                        <span className="ml-1 px-1 py-0.5 bg-white bg-opacity-50 text-xs font-bold rounded-sm">
+                          {selectedEnvironments.length}
+                        </span>
+                      )}
+                    </div>
+                    <ChevronDown size={14} className={`transition-transform flex-shrink-0 ${collapsedSections.environment ? '' : 'rotate-180'}`} />
+                  </button>
+
+                  {!collapsedSections.environment && (
+                    <div>
+                      {environmentList.length === 0 ? (
+                        <div className="text-xs text-gray-500 px-2 py-1">No values</div>
+                      ) : (
+                        <select
+                          multiple
+                          size={Math.min(6, Math.max(3, environmentList.length))}
+                          value={selectedEnvironments}
+                          onChange={(e) => handleMultiSelectChange('environment', e)}
+                          className="w-full text-xs p-0.5 rounded-sm border bg-white"
+                        >
+                          <option value="All">All</option>
+                          {environmentList.map(env => <option key={env} value={env}>{env}</option>)}
+                        </select>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Fix Version filter removed per request */}
+              </div>
+            </div>
+          )}
+
+          {/* Critical Alerts (improved) */}
+      {alerts && alerts.length > 0 && (
+        <div className="bg-red-50 border-l-4 border-red-400 p-3 mb-3">
+          <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="flex">
+              <AlertTriangle className="w-5 h-5 text-red-400 mr-3 mt-0.5" />
+              <div className="flex-1">
+                <h3 className="text-sm font-medium text-red-800 mb-1">
+                  Critical Alerts ({alerts.filter(a => a.type === 'critical').length})
+                </h3>
+                <div className="space-y-1 text-sm">
+                  {alerts.slice(0, 3).map((alert, index) => (
+                    <div key={alert.id || index} className="flex items-start justify-between">
+                      <p className="text-sm text-red-700 flex-1">
+                        • {alert.message || alert.title}
+                      </p>
+                      {alert.action && (
+                        <button className="text-xs text-red-600 hover:text-red-800 ml-3 underline">
+                          {alert.action}
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  {alerts.length > 3 && (
+                    <p className="text-xs text-red-600 mt-1">
+                      +{alerts.length - 3} additional alerts
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+        {/* Navegación por tabs con estilo moderno */}
+        <div className="mb-8">
+          <div className="bg-white/60 backdrop-blur-sm rounded-2xl p-2 shadow-sm border" style={{ borderColor: '#e0e0e0' }}>
+            <nav className="flex space-x-2">
+              {tabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`flex items-center px-6 py-3 rounded-xl font-semibold text-sm transition-all duration-300 ${
+                    activeTab === tab.id
+                      ? 'text-white shadow-lg'
+                      : 'hover:bg-[#f8f6fd]'
+                  }`}
+                  style={activeTab === tab.id ? {
+                    background: '#754bde',
+                    boxShadow: '0 10px 25px -5px rgba(117, 75, 222, 0.3)'
+                  } : { color: '#80868d' }}
+                >
+                  <span className={`mr-2 ${
+                    activeTab === tab.id ? 'text-white' : ''
+                  }`} style={activeTab === tab.id ? {} : { color: '#b2b2b2' }}>
+                    {tab.icon}
+                  </span>
+                  <span>{tab.label}</span>
+                </button>
+              ))}
+            </nav>
+          </div>
+        </div>
+
+        {/* Contenido por tabs */}
+        <div className="animate-fade-in">
+          {activeTab === 'overview' && (
+            <OverviewTab
+              data={currentData}
+              filteredData={filteredData}
+              recommendations={recommendations}
+              config={config}
+              setDetailModal={setDetailModal}
+              detailModal={detailModal}
+              tooltipInfo={tooltipInfo}
+              showSprintTooltip={showSprintTooltip}
+              hideSprintTooltip={hideSprintTooltip}
+              setTooltipInfo={setTooltipInfo}
+              // filter lists
+              sprintList={sprintList}
+              moduleList={moduleList}
+              priorityList={priorityList}
+              statusList={statusList}
+              developerList={developerList}
+              categoryList={categoryList}
+              // filter state & handlers
+              selectedSprints={selectedSprints}
+              setSelectedSprints={setSelectedSprints}
+              testTypeFilter={testTypeFilter}
+              setTestTypeFilter={setTestTypeFilter}
+              selectedStatus={selectedStatus}
+              selectedPriorities={selectedPriorities}
+              selectedDevelopers={selectedDevelopers}
+              selectedCategories={selectedCategories}
+              showFilters={showFilters}
+              setShowFilters={setShowFilters}
+              collapsedSections={collapsedSections}
+              setCollapsedSections={setCollapsedSections}
+              handleFilterToggle={handleFilterToggle}
+            />
+          )}
+          {activeTab === 'quality' && <QualityTab data={currentData} filteredData={filteredData} config={config} setDetailModal={setDetailModal} detailModal={detailModal} />}
+          {activeTab === 'teams' && <TeamsTab data={currentData} filteredData={filteredData} setDetailModal={setDetailModal} detailModal={detailModal} config={config} />}
+          {/* trends tab removed */}
+          {activeTab === 'roadmap' && <RecommendationsTab data={currentData} filteredData={filteredData} setDetailModal={setDetailModal} detailModal={detailModal} />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ===============================
+// TAB COMPONENTS (keep existing ones)
+// ===============================
+
+function OverviewTab({ data, filteredData, recommendations, config, setDetailModal, detailModal, tooltipInfo, showSprintTooltip, hideSprintTooltip, setTooltipInfo,
+  sprintList, moduleList, priorityList, statusList, developerList, categoryList,
+  selectedSprints, setSelectedSprints, testTypeFilter, setTestTypeFilter,
+  selectedStatus, selectedPriorities, selectedDevelopers, selectedCategories,
+  showFilters, setShowFilters, collapsedSections, setCollapsedSections, handleFilterToggle
+}) {
+  const { kpis, summary } = data;
+  // Use filtered sprint data computed at parent level
+  const filteredSprintData = filteredData?.sprintData || data.sprintData || [];
+
+  // Helper to check if a KPI should be visible according to config
+  const isKpiVisible = (kpiId) => {
+    try {
+      const visible = config?.visibleKpis?.overview;
+      // if config not set or visible list not present, show everything
+      if (!visible || !Array.isArray(visible)) return true;
+      return visible.includes(kpiId);
+    } catch (e) {
+      return true;
+    }
+  };
+
+  // Clasificar sprints por tipo de prueba basado en tags y environment
+  const classifyTestType = (sprint) => {
+    // Preferir el campo testType si existe (viene del procesador Excel enriquecido)
+    if (sprint.testType) {
+      return sprint.testType;
+    }
+    
+    const tags = (sprint.tags || '').toLowerCase();
+    const env = (sprint.environment || '').toUpperCase();
+    
+    // Si contiene tags de UAT o "equipo", es UAT
+    if (tags.includes('uat') || tags.includes('equipo')) {
+      return 'uat';
+    }
+    // Si contiene tags de integración o smoke, es System
+    if (tags.includes('integración') || tags.includes('smoke')) {
+      return 'system';
+    }
+    // Por defecto, asumir system testing
+    return 'system';
+  };
+
+  // Filtro de sprints con checkboxes
+  const handleSprintToggle = (sprint) => {
+    if (sprint === 'All') {
+      setSelectedSprints(['All']);
+    } else {
+      setSelectedSprints(prev => {
+        // If 'All' is selected, replace with the clicked sprint
+        if (prev.includes('All')) {
+          return [sprint];
+        }
+
+        // If the sprint is already selected, remove it
+        if (prev.includes(sprint)) {
+          const filtered = prev.filter(s => s !== sprint);
+          // If none left, return to 'All'
+          return filtered.length === 0 ? ['All'] : filtered;
+        }
+
+        // Otherwise add it
+        return [...prev, sprint];
+      });
+    }
+  };
+
+  // Manejar cambio de tipo de prueba - resetear sprints seleccionados
+  const handleTestTypeChange = (newType) => {
+    setTestTypeFilter(newType);
+    // Reset sprints to 'All' when test type changes
+    setSelectedSprints(['All']);
+  };
+
+  // Obtener sprints disponibles según el tipo de prueba seleccionado
+  const getAvailableSprints = () => {
+    if (testTypeFilter === 'all') {
+      return sprintList;
+    }
+    // Filtrar sprints según el tipo seleccionado
+      return sprintList.filter(sprint => {
+        const sprintData = data.sprintData?.find(s => (((s.sprint || s.name || s.id) || '').toString() === (sprint || '').toString()));
+        return classifyTestType(sprintData) === testTypeFilter;
+      });
+  };
+
+  const availableSprints = getAvailableSprints();
+  
+
+  // Recalcular KPIs basados en los sprints seleccionados y tipo de prueba
+  const totalTestCases = filteredSprintData?.reduce((acc, s) => acc + (s.testCases || s.testCasesExecuted || 0), 0) || 0;
+  
+  // If any filters are active (sprint, type or any other filter), treat as filtered mode
+  const hasFiltersActive = (
+    !selectedSprints.includes('All') ||
+    testTypeFilter !== 'all' ||
+    (typeof selectedStatus !== 'undefined' && selectedStatus[0] !== 'All') ||
+    (typeof selectedPriorities !== 'undefined' && selectedPriorities[0] !== 'All') ||
+    (typeof selectedTags !== 'undefined' && selectedTags[0] !== 'All') ||
+    (typeof selectedStrategies !== 'undefined' && selectedStrategies[0] !== 'All') ||
+    (typeof selectedEnvironments !== 'undefined' && selectedEnvironments[0] !== 'All') ||
+    (typeof selectedFixVersions !== 'undefined' && selectedFixVersions[0] !== 'All')
+  );
+
+  // Para totalBugs: si hay filtros activos, usar sprints filtrados. Si no, usar el total global (238)
+  const totalBugs = hasFiltersActive
+    ? (filteredSprintData?.reduce((acc, s) => acc + (s.bugs || s.bugsFound || 0), 0) || 0)
+    : (summary.totalBugs || 0);
+  const bugsClosed = hasFiltersActive
+    ? (filteredSprintData?.reduce((acc, s) => acc + (s.bugsResolved || s.bugsClosed || 0), 0) || 0)
+    : (summary.bugsClosed || 0);
+  
+  // Calcular bugs críticos desde los sprints filtrados (usar datos reales del JSON)
+  let criticalBugsPending, criticalBugsTotal, criticalBugsMasAlta, criticalBugsAlta;
+  if (hasFiltersActive) {
+    // Con filtros: calcular desde datos reales de sprints filtrados
+    const sprintsCriticalData = filteredSprintData?.reduce((acc, sprint) => {
+      acc.total += (sprint.criticalBugsTotal || 0);
+      acc.pending += (sprint.criticalBugsPending || 0);
+      return acc;
+    }, { total: 0, pending: 0 });
+    
+    criticalBugsTotal = sprintsCriticalData?.total || 0;
+    criticalBugsPending = sprintsCriticalData?.pending || 0;
+    criticalBugsMasAlta = Math.round(criticalBugsTotal * 0.4);
+    criticalBugsAlta = Math.round(criticalBugsTotal * 0.6);
+  } else {
+    // Sin filtros: usar datos globales de bugsByPriority
+    if (!data.bugsByPriority || Object.keys(data.bugsByPriority).length === 0) {
+      // Si no hay datos, usar 0
+      criticalBugsMasAlta = 0;
+      criticalBugsAlta = 0;
+      criticalBugsPending = 0;
+      criticalBugsTotal = 0;
+    } else {
+      // Encontrar las claves correctas buscando por contenido (maneja caracteres especiales)
+      let masAltaKey = null;
+      let altaKey = null;
+      
+      // Buscar "Más alta" considerando variaciones de codificación
+      for (const key of Object.keys(data.bugsByPriority || {})) {
+        const lowerKey = key.toLowerCase();
+        if (lowerKey.includes('mas') || lowerKey.includes('maa') || lowerKey.includes('más')) {
+          if (lowerKey.includes('alta')) {
+            masAltaKey = key;
+          }
+        }
+        if (lowerKey === 'alta') {
+          altaKey = key;
+        }
+      }
+      
+      // Si no se encontró la clave, usar la más probable
+      if (!masAltaKey) {
+        const allKeys = Object.keys(data.bugsByPriority || {});
+        masAltaKey = allKeys.find(k => !k.toLowerCase().includes('baja') && !k.toLowerCase().includes('media') && k !== 'Alta') || 'Más Alta';
+      }
+      if (!altaKey) altaKey = 'Alta';
+      
+      criticalBugsMasAlta = data.bugsByPriority?.[masAltaKey]?.count || 0;
+      criticalBugsAlta = data.bugsByPriority?.[altaKey]?.count || 0;
+      criticalBugsPending = ((data.bugsByPriority?.[masAltaKey]?.pending || 0) + (data.bugsByPriority?.[altaKey]?.pending || 0)) || 0;
+      
+      criticalBugsTotal = (criticalBugsMasAlta || 0) + (criticalBugsAlta || 0);
+    }
+  }
+  
+  const avgTestCasesPerSprint = filteredSprintData && filteredSprintData.length > 0
+    ? Math.round(totalTestCases / filteredSprintData.length)
+    : kpis.avgTestCasesPerSprint || 0;
+  
+  const resolutionEfficiency = totalBugs > 0 
+    ? Math.round((bugsClosed / totalBugs) * 100) 
+    : kpis.resolutionEfficiency || 0;
+  
+  const criticalBugsRatio = totalBugs > 0 
+    ? Math.round((criticalBugsPending / totalBugs) * 100) 
+    : kpis.criticalBugsRatio || 0;
+
+  // Derived execution rate based on staged/filtered sprint data when available
+  const totalPlannedTests = (filteredSprintData && filteredSprintData.length > 0)
+    ? filteredSprintData.reduce((acc, s) => acc + (s.testCasesPlanned || s.testCasesTotal || s.testCases || 0), 0)
+    : (data.summary?.testCasesTotal || 0);
+  const derivedExecutionRate = totalPlannedTests > 0 ? Math.round((totalTestCases / totalPlannedTests) * 100) : (kpis.testExecutionRate || 0);
+
+  // Derived leakage rate: prefer kpis value, fallback to 0
+  const derivedLeakageRate = (kpis && kpis.bugLeakageRate !== undefined) ? kpis.bugLeakageRate : 0;
+
+  // Calculate trends comparing first half vs second half of selected sprints
+  const calculateTrend = (getData) => {
+    if (!filteredSprintData || filteredSprintData.length < 2) return 0;
+    
+    const midPoint = Math.floor(filteredSprintData.length / 2);
+    const firstHalf = filteredSprintData.slice(0, midPoint);
+    const secondHalf = filteredSprintData.slice(midPoint);
+    
+    const firstAvg = firstHalf.reduce((acc, s) => acc + getData(s), 0) / firstHalf.length;
+    const secondAvg = secondHalf.reduce((acc, s) => acc + getData(s), 0) / secondHalf.length;
+    
+    if (firstAvg === 0) return 0;
+    return Math.round(((secondAvg - firstAvg) / firstAvg) * 100);
+  };
+
+  const testCasesTrend = calculateTrend(s => s.testCases || s.testCasesExecuted || 0);
+  const resolutionTrend = calculateTrend(s => {
+    const total = s.bugs || s.bugsFound || 0;
+    const resolved = s.bugsResolved || s.bugsClosed || 0;
+    return total > 0 ? (resolved / total) * 100 : 0;
+  });
+  const criticalBugsTrend = calculateTrend(s => s.bugs || s.bugsFound || 0) * -1; // Invertido porque menos bugs es mejor
+  
+  const executionTrend = calculateTrend(s => {
+    const planned = (s.testCasesPlanned || s.testCasesTotal || s.testCases || 0) || 0;
+    const executed = (s.testCases || s.testCasesExecuted || 0) || 0;
+    return planned > 0 ? Math.round((executed / planned) * 100) : 0;
+  });
+
+  // 1. Cycle Time: Tiempo promedio de resolución de bugs
+  const calculateCycleTime = () => {
+    if (!filteredSprintData || filteredSprintData.length === 0) return { avg: 0, byPriority: {} };
+    
+    // Usar datos reales del JSON si están disponibles (avgResolutionTime en cada sprint)
+    let avgCycleTime;
+    const sprintDuration = 14; // días
+    
+    // Intentar usar datos enriquecidos de cada sprint
+    const sprintResolutionTimes = filteredSprintData
+      .filter(s => s.avgResolutionTime !== undefined)
+      .map(s => s.avgResolutionTime);
+    
+    if (sprintResolutionTimes.length > 0) {
+      // Usar el promedio de los tiempos de resolución reales
+      avgCycleTime = Math.round(
+        sprintResolutionTimes.reduce((a, b) => a + b, 0) / sprintResolutionTimes.length
+      );
+    } else {
+      // Fallback: calcular como antes
+      let totalBugsOpen = 0;
+      let totalBugsResolved = 0;
+      
+      filteredSprintData.forEach(sprint => {
+        const bugsOpen = sprint.bugs || sprint.bugsFound || 0;
+        const bugsResolved = sprint.bugsResolved || sprint.bugsClosed || 0;
+        totalBugsOpen += bugsOpen;
+        totalBugsResolved += bugsResolved;
+      });
+      
+      // Cycle Time = (Bugs pendientes promedio) / (Velocidad de resolución por día)
+      const numSprints = filteredSprintData.length || 1;
+      const avgBugsPendingPerSprint = totalBugsOpen / numSprints;
+      const resolvedPerDay = totalBugsResolved / (numSprints * sprintDuration);
+      
+      if (resolvedPerDay > 0) {
+        avgCycleTime = Math.round((avgBugsPendingPerSprint / resolvedPerDay) * 10) / 10;
+      } else {
+        avgCycleTime = sprintDuration; // fallback: duración del sprint
+      }
+    }
+    
+    // Calcular Cycle Time por prioridad basado en eficiencia de resolución
+    let priorityCycleTime = {};
+    if (data.bugsByPriority) {
+      const masAltaTotal = data.bugsByPriority['Más alta']?.count || 0;
+      const masAltaResolved = data.bugsByPriority['Más alta']?.resolved || 0;
+      const altaTotal = data.bugsByPriority['Alta']?.count || 0;
+      const altaResolved = data.bugsByPriority['Alta']?.resolved || 0;
+      const mediaTotal = data.bugsByPriority['Media']?.count || 0;
+      const mediaResolved = data.bugsByPriority['Media']?.resolved || 0;
+      const bajaTotal = data.bugsByPriority['Baja']?.count || 0;
+      const bajaResolved = data.bugsByPriority['Baja']?.resolved || 0;
+      
+      // Calcular cycle time por prioridad: (bugs pendientes / bugs resueltos) × promedio de días
+      // Para "Más alta" debería ser más rápido (menos días)
+      priorityCycleTime.critical = masAltaResolved > 0 
+        ? Math.round(((masAltaTotal - masAltaResolved) / masAltaResolved * 5) * 10) / 10  // 5 días max para críticos
+        : Math.round(avgCycleTime * 0.5);
+      
+      priorityCycleTime.high = altaResolved > 0 
+        ? Math.round(((altaTotal - altaResolved) / altaResolved * 8) * 10) / 10  // 8 días para alta
+        : Math.round(avgCycleTime * 0.8);
+      
+      priorityCycleTime.medium = mediaResolved > 0 
+        ? Math.round(((mediaTotal - mediaResolved) / mediaResolved * 14) * 10) / 10  // 14 días para media
+        : avgCycleTime;
+      
+      priorityCycleTime.low = bajaResolved > 0 
+        ? Math.round(((bajaTotal - bajaResolved) / bajaResolved * 21) * 10) / 10  // 21 días para baja
+        : Math.round(avgCycleTime * 1.5);
+    } else {
+      // Fallback si no hay datos
+      priorityCycleTime = {
+        critical: Math.round(avgCycleTime * 0.5),
+        high: Math.round(avgCycleTime * 0.8),
+        medium: avgCycleTime,
+        low: Math.round(avgCycleTime * 1.5)
+      };
+    }
+    
+    return {
+      avg: Math.max(avgCycleTime, 1), // Asegurar que sea al menos 1 día
+      byPriority: priorityCycleTime
+    };
+  };
+  
+  const cycleTimeData = calculateCycleTime();
+  
+  // Cobertura de Automatización de Pruebas (para ficha 7)
+  const calculateAutomationCoverage = () => {
+    if (!filteredSprintData || filteredSprintData.length === 0) return { coverage: 0, automated: 0, manual: 0, trend: [] };
+    
+    const avgCoverage = filteredSprintData.reduce((acc, sprint) => {
+      const totalTests = sprint.testCases || 0;
+      const velocityFactor = (sprint.velocity || 15) / 20;
+      const estimatedAutomated = Math.round(totalTests * (0.35 + velocityFactor * 0.25));
+      const coveragePercent = totalTests > 0 ? (estimatedAutomated / totalTests) * 100 : 0;
+      return acc + coveragePercent;
+    }, 0) / filteredSprintData.length;
+    
+    const lastSprint = filteredSprintData[filteredSprintData.length - 1] || {};
+    const totalTests = lastSprint.testCases || 0;
+    const velocityFactor = (lastSprint.velocity || 15) / 20;
+    const automatedTests = Math.round(totalTests * (0.35 + velocityFactor * 0.25));
+    const manualTests = totalTests - automatedTests;
+    
+    return {
+      coverage: Math.round(avgCoverage),
+      automated: automatedTests,
+      manual: manualTests,
+      total: totalTests,
+      trend: filteredSprintData.map(s => {
+        const total = s.testCases || 0;
+        const vFactor = (s.velocity || 15) / 20;
+        const auto = Math.round(total * (0.35 + vFactor * 0.25));
+        return total > 0 ? Math.round((auto / total) * 100) : 0;
+      })
+    };
+  };
+  
+  const automationData = calculateAutomationCoverage();
+  
+  // 2. Defect Density: Densidad de defectos por sprint (datos reales)
+  const calculateDefectDensityPerSprint = () => {
+    if (!filteredSprintData || filteredSprintData.length === 0) return { avg: 0, total: 0, max: 0, min: 0 };
+    
+    // Usar datos reales de bugs por sprint (excluye Sugerencias)
+    const bugsPerSprint = filteredSprintData.map(s => s.bugs || 0);
+    const totalBugsInSprints = bugsPerSprint.reduce((acc, bugs) => acc + bugs, 0);
+    const avgBugsPerSprint = totalBugsInSprints / filteredSprintData.length;
+    const maxBugs = Math.max(...bugsPerSprint);
+    const minBugs = Math.min(...bugsPerSprint);
+    
+    return {
+      avg: Math.round(avgBugsPerSprint * 10) / 10, // Redondear a 1 decimal
+      total: totalBugsInSprints,
+      max: maxBugs,
+      min: minBugs,
+      sprints: filteredSprintData.length
+    };
+  };
+  
+  const defectDensityData = calculateDefectDensityPerSprint();
+
+  // Calcular datos de sparkline para cada métrica
+  const getSparklineData = (metric) => {
+    if (!filteredSprintData || filteredSprintData.length === 0) return [];
+    
+    return filteredSprintData.map(sprint => {
+      switch(metric) {
+        case 'testCases':
+          return sprint.testCases || sprint.testCasesExecuted || 0;
+        case 'resolutionEfficiency':
+          const total = sprint.bugs || sprint.bugsFound || 0;
+          const resolved = sprint.bugsResolved || sprint.bugsClosed || 0;
+          return total > 0 ? Math.round((resolved / total) * 100) : 0;
+        case 'automationCoverage':
+          const totalTests = sprint.testCases || 0;
+          const velocityFactor = (sprint.velocity || 15) / 20;
+          const automated = Math.round(totalTests * (0.35 + velocityFactor * 0.25));
+          return totalTests > 0 ? Math.round((automated / totalTests) * 100) : 0;
+        case 'criticalBugs':
+          // Si existe el dato directo, usarlo
+          if (sprint.criticalBugs !== undefined) {
+            return sprint.criticalBugs;
+          }
+          // Si no, estimar basado en proporción de bugs totales
+          // Asumiendo ~35% de bugs son críticos (Más alta + Alta)
+          const sprintBugs = sprint.bugs || 0;
+          return Math.round(sprintBugs * 0.35);
+        case 'criticalBugsPending':
+          // Si existe el dato directo, usarlo
+          if (sprint.criticalBugsPending !== undefined) {
+            return sprint.criticalBugsPending;
+          }
+          // Si no, estimar basado en bugs pendientes
+          const pending = sprint.bugsPending || 0;
+          return Math.round(pending * 0.35);
+        case 'cycleTime':
+          const eff = sprint.resolutionEfficiency || 70;
+          return Math.round(15 - (eff / 10));
+        case 'defectDensity':
+          // Retornar bugs por sprint directamente (datos reales)
+          return sprint.bugs || 0;
+        default:
+          return 0;
+      }
+    });
+  };
+
+  // Renderizar KPI card basado en ID
+  const renderKpiCard = (kpiId) => {
+    switch(kpiId) {
+      case 'cobertura':
+        return (
+          <KPICard
+            key="cobertura"
+            title="Cobertura de Pruebas"
+            value={avgTestCasesPerSprint}
+            icon={<Activity className="w-6 h-6 text-blue-600" />}
+            trend={testCasesTrend}
+            status={avgTestCasesPerSprint >= 170 ? "success" : "warning"}
+            subtitle={`${totalTestCases} pruebas totales ejecutadas`}
+            formula={`${avgTestCasesPerSprint} pruebas/sprint promedio`}
+            tooltip={
+              <div>
+                <div className="font-semibold text-sm text-gray-800 mb-1">What it measures</div>
+                <div className="text-xs text-gray-600 mb-2">Number of tests we execute each sprint. Target: ≥170 tests/sprint.</div>
+                <div className="font-semibold text-sm text-gray-800 mb-1">Why it matters</div>
+                <div className="text-xs text-gray-600">Allows evaluating test coverage and detecting reductions in test execution that may affect quality.</div>
+              </div>
+            }
+            onClick={() => setDetailModal({
+              type: 'testCases',
+              title: 'Analysis of Executed Test Cases',
+              data: {
+                avg: avgTestCasesPerSprint,
+                total: totalTestCases,
+                sprints: filteredSprintData?.length || 0
+              },
+              sparklineData: getSparklineData('testCases'),
+              sprints: filteredSprintData
+            })}
+            detailData={{ avg: avgTestCasesPerSprint, total: totalTestCases }}
+          />
+        );
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <div className="space-y-8">
+      
+      
+      {/* Coverage Metrics */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {/* 1. COBERTURA: Media de Casos */}
+        {isKpiVisible('cobertura') && (
+          <KPICard
+          title="Average Test Cases Executed per Sprint"
+          value={avgTestCasesPerSprint}
+          icon={<Activity className="w-6 h-6 text-blue-600" />}
+          trend={testCasesTrend}
+          status={avgTestCasesPerSprint >= 170 ? "success" : "warning"}
+          subtitle={`${totalTestCases} total executed test cases`}
+          formula={`Average = ${totalTestCases} / ${filteredSprintData?.length || 1}`}
+          tooltip={
+            <div>
+              <div className="font-semibold text-sm text-gray-800 mb-1">What it measures</div>
+              <div className="text-xs text-gray-600 mb-2">Average number of test cases executed per sprint.</div>
+              <div className="font-semibold text-sm text-gray-800 mb-1">Why it matters</div>
+              <div className="text-xs text-gray-600">Measures the productivity of the test team and helps dimension planning and coverage per sprint.</div>
+            </div>
+          }
+          onClick={() => setDetailModal({
+            type: 'testCases',
+            title: 'Analysis of Executed Test Cases',
+            data: {
+              avg: avgTestCasesPerSprint,
+              total: totalTestCases,
+              sprints: filteredSprintData?.length || 0
+            },
+            sparklineData: getSparklineData('testCases'),
+            sprints: filteredSprintData
+          })}
+          detailData={{ avg: avgTestCasesPerSprint, total: totalTestCases }}
+        />
+        )}
+        
+        {/* 2. PRODUCT QUALITY: Finding Density */}
+        {isKpiVisible('densidad') && (
+          <KPICard
+          title="Finding Density per Sprint"
+          value={defectDensityData.avg}
+          icon={<Target className="w-6 h-6 text-orange-600" />}
+          trend={defectDensityData.avg <= 20 ? 5 : -5}
+          status={defectDensityData.avg <= 20 ? "success" : defectDensityData.avg <= 30 ? "warning" : "danger"}
+          subtitle={`Max: ${defectDensityData.max} | Min: ${defectDensityData.min} findings/sprint`}
+          formula={`Average = ${defectDensityData.total} findings / ${defectDensityData.sprints} sprints`}
+          tooltip={
+            <div>
+              <div className="font-semibold text-sm text-gray-800 mb-1">What it measures</div>
+              <div className="text-xs text-gray-600 mb-2">Average findings detected per sprint. Target: ≤20 findings/sprint.</div>
+              <div className="font-semibold text-sm text-gray-800 mb-1">Why it matters</div>
+              <div className="text-xs text-gray-600">Indicates product quality; high values suggest reviewing development, testing or requirements.</div>
+            </div>
+          }
+          onClick={() => setDetailModal({
+            type: 'defectDensity',
+            title: 'Analysis of Finding Density per Sprint',
+            data: defectDensityData,
+            sparklineData: getSparklineData('defectDensity'),
+            sprints: filteredSprintData
+          })}
+          detailData={defectDensityData}
+        />
+        )}
+        
+        {/* 3. EXECUTION RATE */}
+        {isKpiVisible('testExecutionRate') && (
+          <KPICard
+            title="Execution Rate"
+            value={`${derivedExecutionRate || 0}%`}
+            icon={<Activity className="w-6 h-6 text-blue-600" />}
+            trend={executionTrend}
+            status={derivedExecutionRate >= 95 ? 'success' : derivedExecutionRate >= 80 ? 'warning' : 'danger'}
+            subtitle={`Executed: ${totalTestCases} | Planned: ${totalPlannedTests}`}
+            formula={`Execution = ${totalTestCases} / ${totalPlannedTests}`}
+            tooltip={(
+              <div>
+                <div className="font-semibold text-sm text-gray-800 mb-1">What it measures</div>
+                <div className="text-xs text-gray-600 mb-2">Percentage of test cases executed relative to planned test cases.</div>
+                <div className="font-semibold text-sm text-gray-800 mb-1">Why it matters</div>
+                <div className="text-xs text-gray-600">Shows how much of the planned testing was actually executed; helps detect slippage.</div>
+              </div>
+            )}
+            onClick={() => setDetailModal({
+              type: 'testExecutionRate',
+              title: 'Analysis of Execution Rate',
+              data: {
+                executionRate: derivedExecutionRate,
+                executed: totalTestCases,
+                planned: totalPlannedTests,
+                trend: getSparklineData('executionRate')
+              },
+              sparklineData: getSparklineData('executionRate'),
+              sprints: filteredSprintData
+            })}
+            detailData={{ executed: totalTestCases, planned: totalPlannedTests }}
+          />
+        )}
+
+      {/* Main and tracking metrics */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {isKpiVisible('bugsCriticos') && (
+          <KPICard
+          title="Critical Findings Detected"
+          value={criticalBugsTotal}
+          icon={<Bug className="w-6 h-6 text-danger-600" />}
+          trend={criticalBugsTrend}
+          status={criticalBugsTotal <= 20 ? "success" : "danger"}
+          subtitle={`${criticalBugsTotal} critical findings of ${totalBugs}`}
+          formula={`Critical = Highest (${criticalBugsMasAlta}) + High (${criticalBugsAlta})`}
+          tooltip={
+            <div>
+              <div className="font-semibold text-sm text-gray-800 mb-1">What it measures</div>
+              <div className="text-xs text-gray-600 mb-2">Number of findings with priority &apos;Highest&apos; and &apos;High&apos;.</div>
+              <div className="font-semibold text-sm text-gray-800 mb-1">Why it matters</div>
+              <div className="text-xs text-gray-600">Measures the volume of severe incidents that can impact releases and require immediate prioritization.</div>
+            </div>
+          }
+          onClick={() => setDetailModal({
+            type: 'criticalBugs',
+            title: 'Analysis of Critical Findings Detected',
+            data: {
+              total: criticalBugsTotal,
+              highest: criticalBugsMasAlta,
+              high: criticalBugsAlta,
+              totalBugs: totalBugs,
+              allPriorities: data.bugsByPriority
+            },
+            sparklineData: getSparklineData('criticalBugs'),
+            sprints: filteredSprintData
+          })}
+          detailData={{ total: criticalBugsTotal }}
+        />
+        )}
+        
+        {/* 2. CRITICAL TRACKING: Critical Findings Status */}
+        {isKpiVisible('criticosPendientes') && (
+          <KPICard
+          title="Critical Findings Status"
+          value={`${criticalBugsPending}`}
+          icon={<AlertTriangle className="w-6 h-6 text-warning-600" />}
+          trend={criticalBugsTrend}
+          status={criticalBugsPending <= 10 ? "success" : "danger"}
+          subtitle={`${criticalBugsTotal - criticalBugsPending} resolved of ${criticalBugsTotal} critical findings`}
+          formula={`Pending = ${criticalBugsPending} | Resolved = ${criticalBugsTotal - criticalBugsPending}`}
+          tooltip={
+            <div>
+              <div className="font-semibold text-sm text-gray-800 mb-1">What it measures</div>
+              <div className="text-xs text-gray-600 mb-2">Status of critical findings: pending vs resolved.</div>
+              <div className="font-semibold text-sm text-gray-800 mb-1">Why it matters</div>
+              <div className="text-xs text-gray-600">Helps prioritize resource allocation and reduce blockages affecting delivery.</div>
+            </div>
+          }
+          onClick={() => setDetailModal({
+            type: 'criticalBugsStatus',
+            title: 'Critical Findings Status',
+            data: {
+              total: criticalBugsTotal,
+              pending: criticalBugsPending,
+              resolved: criticalBugsTotal - criticalBugsPending,
+              allPriorities: data.bugsByPriority,
+              masAlta: criticalBugsMasAlta,
+              alta: criticalBugsAlta
+            },
+            sparklineData: getSparklineData('criticalBugsPending'),
+            sprints: filteredSprintData
+          })}
+          detailData={{ pending: criticalBugsPending }}
+        />
+        )}
+        
+        {/* 3. VELOCITY: Average Resolution Time */}
+        {isKpiVisible('tiempoSolucion') && (
+          <KPICard
+          title="Average Resolution Time"
+          value={`${cycleTimeData.avg} days`}
+          icon={<Clock className="w-6 h-6 text-executive-600" />}
+          trend={cycleTimeData.avg <= 7 ? 10 : -10}
+          status={cycleTimeData.avg <= 7 ? "success" : cycleTimeData.avg <= 10 ? "warning" : "danger"}
+          subtitle={`Critical: ${cycleTimeData.byPriority.critical}d | High: ${cycleTimeData.byPriority.high}d`}
+          formula={`Based on efficiency: ${resolutionEfficiency}%`}
+          tooltip={
+            <div>
+              <div className="font-semibold text-sm text-gray-800 mb-1">What it measures</div>
+              <div className="text-xs text-gray-600 mb-2">Average time (in days) from detection to resolution of a finding.</div>
+              <div className="font-semibold text-sm text-gray-800 mb-1">Why it matters</div>
+              <div className="text-xs text-gray-600">Measures team response capacity; lower values indicate greater operational agility.</div>
+            </div>
+          }
+          onClick={() => setDetailModal({
+            type: 'cycleTime',
+            title: 'Detailed Resolution Time Analysis',
+            data: cycleTimeData,
+            sparklineData: getSparklineData('cycleTime'),
+            sprints: filteredSprintData
+          })}
+          detailData={cycleTimeData}
+        />
+        )}
+        
+        {/* 4. EFICIENCIA: Eficiencia de Resolución */}
+        {isKpiVisible('resolutionEfficiency') && (
+          <KPICard
+          title="Resolution Efficiency"
+          value={`${resolutionEfficiency}%`}
+          icon={<CheckCircle className="w-6 h-6 text-success-600" />}
+          trend={resolutionTrend}
+          status={resolutionEfficiency >= 70 ? "success" : "warning"}
+          subtitle={`${bugsClosed} resolved of ${totalBugs} total (${totalBugs - bugsClosed} open)`}
+          formula={`Efficiency = ${bugsClosed} / ${totalBugs} × 100`}
+          tooltip={
+            <div>
+              <div className="font-semibold text-sm text-gray-800 mb-1">What it measures</div>
+              <div className="text-xs text-gray-600 mb-2">Percentage of findings resolved relative to total reported.</div>
+              <div className="font-semibold text-sm text-gray-800 mb-1">Why it matters</div>
+              <div className="text-xs text-gray-600">Evaluates the team&apos;s effectiveness in closing incidents and maintaining product stability.</div>
+            </div>
+          }
+          onClick={() => setDetailModal({
+            type: 'resolutionEfficiency',
+            title: 'Resolution Efficiency Analysis',
+            data: {
+              efficiency: resolutionEfficiency,
+              total: totalBugs,
+              resolved: bugsClosed,
+              pending: totalBugs - bugsClosed
+            },
+            sparklineData: getSparklineData('resolutionEfficiency'),
+            sprints: filteredSprintData
+          })}
+          detailData={{ efficiency: resolutionEfficiency }}
+        />
+        )}
+      </div>
+
+      {/* Comparación Sprint-over-Sprint */}
+      <SprintComparison data={data} filteredSprintData={filteredSprintData} />
+
+      {/* Second row of additional metrics */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {/* Ficha 7: Cobertura de Automatización - UNDER CONSTRUCTION */}
+        {/* Moved: Tasa de Regresión */}
+        {isKpiVisible('regressionRate') && (
+          <KPICard
+          title="Regression Rate"
+          value={"2.4%"}
+          icon={<TrendingDown className="w-6 h-6 text-orange-600" />}
+          trend={-3}
+          status={"success"}
+          tooltip={
+            <div>
+              <div className="font-semibold text-sm text-gray-800 mb-1">What it measures</div>
+              <div className="text-xs text-gray-600 mb-2">Percentage of findings reopened after closure.</div>
+              <div className="font-semibold text-sm text-gray-800 mb-1">Why it matters</div>
+              <div className="text-xs text-gray-600">Indicates correction quality; high rates suggest issues in resolution or insufficient testing.</div>
+            </div>
+          }
+          onClick={() => setDetailModal({
+            type: 'regressionRate',
+            title: 'Regression Rate Analysis',
+            data: {
+              regressionRate: 2.4,
+              reopened: Math.round(bugsClosed * 0.024),
+              closed: bugsClosed,
+              trend: getSparklineData('regressionRate')
+            },
+            sparklineData: getSparklineData('regressionRate'),
+            sprints: filteredSprintData
+          })}
+          detailData={{ regressionRate: 2.4 }}
+        />
+        )}
+        {isKpiVisible('automatizacion') && (
+          <UnderConstructionCard
+          title="Automation Coverage"
+          value={`${automationData.coverage}%`}
+          icon={<Settings className="w-6 h-6 text-purple-600" />}
+          subtitle={`${automationData.automated} automated | ${automationData.manual} manual`}
+          onClick={() => setDetailModal({
+            type: 'automationCoverage',
+            title: 'Automation Coverage Analysis',
+            data: automationData,
+            sparklineData: getSparklineData('automationCoverage'),
+            sprints: filteredSprintData
+          })}
+          help={(
+            <div>
+              <div className="font-semibold">What it measures:</div>
+              <div className="text-xs">Percentage of tests executed automatically.</div>
+              <div className="font-semibold mt-2">Why it matters:</div>
+              <div className="text-xs">Shows how much test work can run without manual intervention, speeding up validations.</div>
+            </div>
+          )}
+          />
+        )}
+        
+        {((kpis && kpis.bugLeakageRate !== undefined) || totalBugs > 0) && (
+          <UnderConstructionCard
+            title="Leak Rate"
+            value={`${derivedLeakageRate}%`}
+            icon={<TrendingUp className="w-6 h-6 text-red-600" />}
+            subtitle="Findings in production"
+            onClick={() => setDetailModal({
+              type: 'bugLeakageRate',
+              title: 'Leak Rate Analysis',
+              data: {
+                leakageRate: derivedLeakageRate,
+                productionBugs: totalBugs ? Math.round((derivedLeakageRate / 100) * totalBugs) : 0,
+                totalBugs: totalBugs || 0,
+                trend: getSparklineData('bugLeakageRate')
+              },
+              sparklineData: getSparklineData('bugLeakageRate'),
+              sprints: filteredSprintData
+            })}
+            help={(
+              <div>
+                <div className="font-semibold">What it measures:</div>
+                <div className="text-xs">Percentage of defects detected in production versus total.</div>
+                <div className="font-semibold mt-2">Why it matters:</div>
+                <div className="text-xs">Indicates impact on real users and helps prioritize urgent fixes.</div>
+              </div>
+            )}
+          />
+        )}
+      </div>
+
+      {/* Main filtered charts */}
+      <div className="grid grid-cols-1 gap-8">
+        <div className="executive-card">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">
+            Trend of Selected Sprints
+          </h3>
+          <SprintTrendChart data={filteredSprintData || data.sprintData || data.trends?.bugsPerSprint} />
+        </div>
+      </div>
+
+      {/* Comparativa Sprint a Sprint */}
+      {filteredSprintData && filteredSprintData.length >= 2 && (
+        <SprintComparison 
+          sprintData={filteredSprintData} 
+          selectedSprints={selectedSprints}
+        />
+      )}
+
+      {/* Summary of critical modules */}
+      {data.moduleData && (
+        <div className="executive-card">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">
+            Module Analysis
+          </h3>
+          <ModuleAnalysis data={data.moduleData} />
+        </div>
+      )}
+
+      {/* Actionable Recommendations */}
+      <ActionableRecommendations data={data} filteredSprintData={filteredSprintData} />
+
+      {/* Modal de detalles */}
+      <DetailModal 
+        modal={detailModal} 
+        onClose={() => setDetailModal(null)} 
+        recommendations={recommendations || data?.recommendations || {}}
+      />
+    </div>
+  );
+}
+
+// Mantén las otras funciones de tabs exactamente como las tienes...
+function QualityTab({ data, filteredData, sprintList, selectedSprints, handleFilterToggle, showFilters, config, setDetailModal, detailModal }) {
+  const visible = config?.visibleKpis?.quality;
+  return (
+    <div className="space-y-8">
+      {/* Merge kpis + qualityMetrics + summary so QualityMetrics can compute derived metrics */}
+      <QualityMetrics 
+        data={{ ...data.kpis, ...data.qualityMetrics, summary: data.summary }} 
+        visibleKeys={visible} 
+        // pass sprintData already filtered by global filters
+        sprintData={filteredData?.sprintData || data.sprintData}
+        // pass global filter controls and lists so QualityMetrics uses them
+        sprintListProp={sprintList}
+        selectedSprintsProp={selectedSprints}
+        onSprintToggleProp={(v) => handleFilterToggle('sprint', v)}
+        showFiltersProp={showFilters}
+        onOpenDetail={setDetailModal}
+      />
+      
+      {/* Additional quality metrics */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="executive-card">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Defect Density</h3>
+          <div className="text-center">
+            <div className="text-3xl font-bold text-executive-600 mb-2">
+              {data.kpis?.defectDensity || '0.00'}
+            </div>
+            <p className="text-sm text-gray-600">bugs per test case</p>
+          </div>
+        </div>
+        
+        <div className="executive-card">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Automation</h3>
+          <div className="text-center">
+            <div className="text-3xl font-bold text-success-600 mb-2">
+              {data.qualityMetrics?.testAutomation || 0}%
+            </div>
+            <p className="text-sm text-gray-600">automated coverage</p>
+          </div>
+        </div>
+        
+        <div className="executive-card">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Cycle Time</h3>
+          <div className="text-center">
+            <div className="text-3xl font-bold text-warning-600 mb-2">
+              {data.qualityMetrics?.cycleTime || data.kpis?.averageResolutionTime || 0}
+            </div>
+            <p className="text-sm text-gray-600">average days</p>
+          </div>
+        </div>
+      </div>
+      
+      {/* Modules - Quality level by module */}
+      <div className="executive-card">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">Modules</h3>
+        <div className="space-y-4">
+          {Object.entries(data.moduleData || {}).slice(0, 8).map(([moduleName, module]) => {
+            const pct = module.percentage ?? (module.total && data.summary?.totalBugs ? Math.round((module.total / data.summary.totalBugs) * 100) : 0);
+            const level = pct >= 60 ? 'High' : pct >= 40 ? 'Medium' : 'Low';
+            const badgeClass = level === 'High' ? 'bg-red-100 text-red-800' : level === 'Medium' ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800';
+            const Icon = level === 'High' || level === 'Medium' ? AlertTriangle : CheckCircle;
+
+            return (
+              <div
+                key={moduleName}
+                role="button"
+                tabIndex={0}
+                onClick={() => setDetailModal({
+                  type: 'module',
+                  title: moduleName,
+                  data: { [moduleName]: module },
+                  sparklineData: getSparklineData('defectDensity'),
+                  sprints: filteredSprintData
+                })}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setDetailModal({ type: 'module', title: moduleName, data: { [moduleName]: module }, sparklineData: getSparklineData('defectDensity'), sprints: filteredSprintData }); }}
+                className="flex items-center justify-between p-3 bg-gray-50 rounded-lg cursor-pointer hover:shadow-md focus:shadow-md"
+              >
+                <div>
+                  <h4 className="font-medium text-gray-900">{moduleName}</h4>
+                  <p className="text-sm text-gray-600">{module.total || 0} bugs</p>
+                </div>
+                <div className="flex items-center space-x-3">
+                  <span className={`inline-flex items-center px-2 py-1 text-xs font-medium rounded-full ${badgeClass}`}>
+                    <Icon className="w-3 h-3 mr-1" />
+                    {level}
+                  </span>
+                  <span className="text-sm font-semibold text-gray-900">{pct}%</span>
+                </div>
+              </div>
+            );
+          })}
+          {(!data.moduleData || Object.keys(data.moduleData).length === 0) && (
+            <div className="text-sm text-gray-600">No module data available</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TeamsTab({ data, filteredData, setDetailModal, detailModal, config }) {
+  // Determine source of bugs and developer summary
+  const bugs = (filteredData && Array.isArray(filteredData.bugs)) ? filteredData.bugs : (data && Array.isArray(data.bugs) ? data.bugs : []);
+
+  // If processed developerData exists, prefer it; otherwise derive from bugs
+  let developerData = (data && data.developerData && Array.isArray(data.developerData) && data.developerData.length > 0)
+    ? data.developerData
+    : null;
+
+  if (!developerData) {
+    const byDev = {};
+    bugs.forEach(b => {
+      const name = (b.developer || b.developer_name || b.reported || b.owner || 'Sin asignar').toString().trim() || 'Sin asignar';
+      if (!byDev[name]) byDev[name] = { name, totalBugs: 0, pending: 0, resolved: 0 };
+      byDev[name].totalBugs += 1;
+      const status = (b.status || b.estado || '').toString().toLowerCase();
+      const resolvedKeywords = ['resolved', 'closed', 'resuelto', 'cerrado'];
+      if (resolvedKeywords.some(k => status.includes(k))) {
+        byDev[name].resolved += 1;
+      } else {
+        byDev[name].pending += 1;
+      }
+    });
+
+    const maxThreshold = (config && config.thresholds && config.thresholds.maxBugsDeveloper) ? config.thresholds.maxBugsDeveloper : 15;
+    developerData = Object.values(byDev).map(d => {
+      const workload = d.pending > maxThreshold ? 'Alto' : (d.pending > Math.round(maxThreshold / 2) ? 'Medio' : 'Bajo');
+      const efficiency = d.totalBugs > 0 ? Math.round((d.resolved / d.totalBugs) * 100) : 0;
+      return { ...d, workload, efficiency };
+    }).sort((a, b) => (b.pending || 0) - (a.pending || 0));
+  }
+
+  return (
+    <div className="space-y-8">
+      <DeveloperAnalysis data={developerData} />
+
+      {/* Productivity Analysis */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="executive-card">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">
+            Workload Distribution
+          </h3>
+          <div className="space-y-3">
+            {(developerData || []).map((dev, index) => (
+              <div key={index} className="flex items-center">
+                <span className="w-32 text-sm font-medium text-gray-600 truncate">
+                  {dev.name}
+                </span>
+                <div className="flex-1 mx-4">
+                  <div className="bg-gray-200 rounded-full h-3 relative">
+                    <div
+                      className={`h-3 rounded-full ${
+                        dev.workload === 'Alto' || dev.pending > 15 ? 'bg-red-500' :
+                        dev.workload === 'Medio' || dev.pending > 10 ? 'bg-yellow-500' : 'bg-green-500'
+                      }`}
+                      style={{ width: `${Math.min((dev.pending / Math.max(1, (config?.thresholds?.maxBugsDeveloper || 15))) * 100, 100)}%` }}
+                    />
+                  </div>
+                </div>
+                <span className="text-sm font-medium text-gray-900 w-16">
+                  {dev.pending || 0} bugs
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+        
+        <div className="executive-card">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">
+            Eficiencia por Desarrollador
+          </h3>
+          <div className="space-y-3">
+            {(developerData || []).map((dev, index) => {
+              const totalBugs = dev.totalBugs || (dev.resolved + dev.pending) || dev.assigned || 0;
+              const resolved = dev.resolved || 0;
+              const efficiency = totalBugs > 0 ? Math.round((resolved / totalBugs) * 100) : 0;
+              
+              return (
+                <div key={index} className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-gray-900 truncate">
+                    {dev.name}
+                  </span>
+                  <div className="flex items-center space-x-2">
+                    <div className="w-20 bg-gray-200 rounded-full h-2">
+                      <div
+                        className="bg-executive-500 h-2 rounded-full"
+                        style={{ width: `${efficiency}%` }}
+                      />
+                    </div>
+                    <span className="text-sm font-medium text-gray-600 w-10">
+                      {efficiency}%
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+
+function RecommendationsTab({ data, setDetailModal, detailModal }) {
+  // Use both existing and new recommendations
+  const recommendations = data.recommendations || [];
+  
+  return (
+    <div className="space-y-8">
+      {/* Improved recommendations */}
+      {recommendations.length > 0 ? (
+        <div className="executive-card">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">
+            Smart Recommendations
+          </h3>
+          <div className="space-y-4">
+            {recommendations.map((rec, index) => (
+              <div key={rec.id || index} className="border-l-4 border-blue-500 pl-4 py-3">
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <h4 className="font-medium text-gray-900 mb-1">{rec.title}</h4>
+                    <p className="text-sm text-gray-600 mb-2">{rec.description}</p>
+                    <div className="flex items-center space-x-3">
+                      <span className={`px-2 py-1 rounded text-xs font-medium ${
+                        rec.impact === 'high' ? 'bg-red-100 text-red-800' : 
+                        rec.impact === 'medium' ? 'bg-yellow-100 text-yellow-800' : 
+                        'bg-green-100 text-green-800'
+                      }`}>
+                        Impacto: {rec.impact}
+                      </span>
+                      <span className={`px-2 py-1 rounded text-xs font-medium ${
+                        rec.effort === 'high' ? 'bg-red-100 text-red-800' :
+                        rec.effort === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                        'bg-green-100 text-green-800'
+                      }`}>
+                        Esfuerzo: {rec.effort}
+                      </span>
+                      {rec.type && (
+                        <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs font-medium">
+                          {rec.type}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <button className="text-sm text-blue-600 hover:text-blue-800 font-medium ml-4">
+                    Implementar
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        // Use existing component if no new recommendations
+        <ExecutiveRecommendations data={data.recommendations} />
+      )}
+      
+      {/* ROI and Value Metrics */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="executive-card">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">
+            ROI del Proceso QA
+          </h3>
+          <div className="space-y-4">
+            <div className="flex justify-between items-center p-3 bg-green-50 rounded-lg">
+              <span className="text-sm font-medium text-gray-700">
+                Bugs Detectados Temprano
+              </span>
+              <span className="text-lg font-bold text-green-600">
+                ${data.roi?.earlyDetection || '276,000'}
+              </span>
+            </div>
+            <div className="flex justify-between items-center p-3 bg-blue-50 rounded-lg">
+              <span className="text-sm font-medium text-gray-700">
+                Mejora en Velocidad
+              </span>
+              <span className="text-lg font-bold text-blue-600">
+                +{data.roi?.velocityImprovement || '15'}%
+              </span>
+            </div>
+            <div className="flex justify-between items-center p-3 bg-purple-50 rounded-lg">
+              <span className="text-sm font-medium text-gray-700">
+                Reducción Hotfixes
+              </span>
+              <span className="text-lg font-bold text-purple-600">
+                -{data.roi?.hotfixReduction || '80'}%
+              </span>
+            </div>
+            {/* New ROI metrics if available */}
+            {data.kpis?.averageResolutionTime && (
+              <div className="flex justify-between items-center p-3 bg-orange-50 rounded-lg">
+                <span className="text-sm font-medium text-gray-700">
+                  Average Resolution Time
+                </span>
+                <span className="text-lg font-bold text-orange-600">
+                  {data.kpis.averageResolutionTime} days
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+        
+        <div className="executive-card">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">
+            Madurez del Proceso
+          </h3>
+          <div className="space-y-4">
+            <div>
+              <div className="flex justify-between text-sm font-medium text-gray-700 mb-1">
+                <span>Nivel Actual</span>
+                <span>{data.processMaturity?.current || '3/5'} ({data.processMaturity?.currentLevel || 'Definido'})</span>
+              </div>
+              <div className="bg-gray-200 rounded-full h-2">
+                <div 
+                  className="bg-executive-500 h-2 rounded-full" 
+                  style={{ width: `${(data.processMaturity?.currentScore || 3) * 20}%` }}
+                ></div>
+              </div>
+            </div>
+            
+            <div className="text-sm text-gray-600 space-y-2">
+              <p>• <strong>Objetivo Q1 2025:</strong> {data.processMaturity?.q1Target || '4/5 (Gestionado Cuantitativamente)'}</p>
+              <p>• <strong>Meta Anual:</strong> {data.processMaturity?.yearTarget || '5/5 (Optimizado)'}</p>
+            </div>
+            
+            <div className="pt-4 border-t border-gray-200">
+              <h4 className="font-medium text-gray-900 mb-2">Next Milestones</h4>
+              <ul className="text-sm text-gray-600 space-y-1">
+                {data.processMaturity?.milestones ? (
+                  data.processMaturity.milestones.map((milestone, index) => (
+                    <li key={index}>• {milestone}</li>
+                  ))
+                ) : (
+                  <>
+                    <li>• Automatización 60% (actual: {data.qualityMetrics?.testAutomation || 25}%)</li>
+                    <li>• Reducir tiempo ciclo a 1.5 días</li>
+                    <li>• Implement predictive metrics</li>
+                  </>
+                )}
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Predictive analysis if available */}
+      {data.predictions && (
+        <div className="executive-card">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">
+            Predictive Analysis
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {data.predictions.map((prediction, index) => (
+              <div key={index} className="text-center p-4 bg-gray-50 rounded-lg">
+                <div className={`text-2xl font-bold mb-2 ${
+                  prediction.trend === 'up' ? 'text-green-600' :
+                  prediction.trend === 'down' ? 'text-red-600' : 'text-gray-600'
+                }`}>
+                  {prediction.value}
+                </div>
+                <div className="text-sm font-medium text-gray-900 mb-1">
+                  {prediction.metric}
+                </div>
+                <div className="text-xs text-gray-600">
+                  Próximos 30 días
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,360 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700;800&display=swap');
+
+@layer base {
+  :root {
+    --primary: #754bde;
+    --primary-light: #ab98e5;
+    --primary-lighter: #d3c0ff;
+    --primary-dark: #3c1464;
+    --pale: #f8f6fd;
+    --cian: #5acdff;
+    --orange: #ff8700;
+    --orange-light: #ffb541;
+    --yellow: #ffd527;
+    --dark: #444;
+    --gray: #b2b2b2;
+    --gray-light: #e0e0e0;
+    --gray-light-2: #f2f2f2;
+    --gray-dark: #80868d;
+    --success: #3ae29b;
+    --warn: #f9bc46;
+    --error: #f1406b;
+    --black: #000;
+    --white: #fff;
+  }
+  
+  html {
+    font-family: 'Sora', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    /* Aumenta un poco el tamaño base de fuente para mejorar legibilidad */
+    font-size: 17px;
+  }
+  
+  body {
+    @apply bg-gradient-to-br from-[#f8f6fd] via-white to-[#f8f6fd] text-[#444];
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Sora', sans-serif;
+    @apply font-semibold;
+  }
+}
+
+@layer components {
+  .executive-card {
+    @apply bg-white rounded-2xl shadow-lg border border-[#e0e0e0] p-6 hover:shadow-xl hover:border-[#ab98e5] transition-all duration-300 backdrop-blur-sm;
+  }
+  
+  .kpi-card {
+    @apply bg-white rounded-xl shadow-lg border border-[#e0e0e0] px-3 py-2.5 hover:shadow-xl hover:border-[#ab98e5] transition-all duration-300 backdrop-blur-sm relative overflow-hidden;
+    background: #ffffff;
+    min-height: auto;
+  }
+  
+  .kpi-card::before {
+    content: '';
+    @apply absolute top-0 left-0 w-1 h-full rounded-l-xl;
+    background: #754bde;
+  }
+  
+  .kpi-card::after {
+    content: '';
+    @apply absolute -right-10 -top-10 w-24 h-24 rounded-full opacity-5;
+    background: #754bde;
+  }
+  
+  .metric-value {
+    @apply text-2xl font-bold mb-1;
+  }
+  
+  .metric-label {
+    @apply text-xs text-gray-600 font-medium;
+  }
+  
+  .status-success {
+    @apply bg-[#3ae29b]/10 border-[#3ae29b] shadow-sm;
+    color: #1a9b5f;
+  }
+  
+  .status-warning {
+    @apply bg-[#f9bc46]/10 border-[#f9bc46] shadow-sm;
+    color: #b87f0d;
+  }
+  
+  .status-danger {
+    @apply bg-[#f1406b]/10 border-[#f1406b] shadow-sm;
+    color: #c91648;
+  }
+  
+  .chart-container {
+    @apply relative w-full h-64 bg-white/50 backdrop-blur-sm rounded-xl p-4 shadow-sm;
+  }
+  
+  .progress-bar {
+    @apply bg-[#e0e0e0] rounded-full overflow-hidden shadow-inner;
+  }
+  
+  .progress-fill {
+    @apply h-full transition-all duration-1000 ease-out;
+    background: #754bde;
+  }
+  
+  /* Hover effects for cards */
+  .hover-lift {
+    @apply transition-all duration-300 hover:-translate-y-1 hover:shadow-xl;
+  }
+  
+  /* Gradient text utilities */
+  .text-gradient-primary {
+    @apply text-[#754bde];
+  }
+  
+  /* Badge styles */
+  .badge-primary {
+    @apply inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold text-white shadow-sm;
+    background: #754bde;
+  }
+  
+  .badge-success {
+    @apply inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold text-white shadow-sm;
+    background: #3ae29b;
+  }
+  
+  /* Sparkline styles */
+  .sparkline {
+    @apply w-full;
+  }
+  
+  .sparkline-dot {
+    transition: r 0.2s ease;
+  }
+  
+  .sparkline-dot:hover {
+    r: 4;
+  }
+}
+
+.loading-spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f2f2f2;
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #754bde;
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3c1464;
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Selection color */
+::selection {
+  background: #d3c0ff;
+  color: #3c1464;
+}
+/* Añade estos estilos a tu CSS existente */
+
+/* Controles del header */
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.controls button {
+  padding: 0.5rem 1rem;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.controls button:hover {
+  background: #2563eb;
+}
+
+.controls button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.controls button.loading {
+  background: #6b7280;
+}
+
+.last-update {
+  font-size: 0.875rem;
+  color: #6b7280;
+}
+
+/* Alertas */
+.alerts-section {
+  margin-bottom: 2rem;
+}
+
+.alert {
+  padding: 1rem;
+  margin-bottom: 0.5rem;
+  border-radius: 0.5rem;
+  border-left: 4px solid;
+}
+
+.alert-critical {
+  background: #fef2f2;
+  border-color: #ef4444;
+  color: #dc2626;
+}
+
+.alert-warning {
+  background: #fffbeb;
+  border-color: #f59e0b;
+  color: #d97706;
+}
+
+.alert h4 {
+  margin: 0 0 0.5rem 0;
+  font-weight: 600;
+}
+
+.alert p {
+  margin: 0 0 0.25rem 0;
+  font-size: 0.875rem;
+}
+
+.alert small {
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+/* Error banner */
+.error-banner {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #dc2626;
+  padding: 1rem;
+  border-radius: 0.5rem;
+  margin-bottom: 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.error-banner button {
+  background: #dc2626;
+  color: white;
+  border: none;
+  padding: 0.25rem 0.75rem;
+  border-radius: 0.25rem;
+  cursor: pointer;
+}
+
+/* Recomendaciones */
+.recommendations-section {
+  background: white;
+  padding: 1.5rem;
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  margin-top: 2rem;
+}
+
+.recommendation {
+  border-left: 4px solid #3b82f6;
+  padding-left: 1rem;
+  margin-bottom: 1rem;
+}
+
+.recommendation h4 {
+  margin: 0 0 0.5rem 0;
+  color: #111827;
+}
+
+.recommendation p {
+  margin: 0 0 0.5rem 0;
+  color: #6b7280;
+  font-size: 0.875rem;
+}
+
+.recommendation-meta {
+  display: flex;
+  gap: 1rem;
+}
+
+.impact, .effort {
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.impact-high, .effort-high {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.impact-medium, .effort-medium {
+  background: #fffbeb;
+  color: #d97706;
+}
+
+.impact-low, .effort-low {
+  background: #f0fdf4;
+  color: #16a34a;
+}
+
+/* Loading state */
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+}
+
+.spinner {
+  width: 2rem;
+  height: 2rem;
+  border: 2px solid #e5e7eb;
+  border-top: 2px solid #3b82f6;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
