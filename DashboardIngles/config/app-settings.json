@@ -1,0 +1,20 @@
+{
+  "featureToggles": {
+    "enableDeveloperModules": true,
+    "enableRecommendations": true,
+    "enableAutoGenerateJson": false
+  },
+  "ui": {
+    "showDataSourceCard": true,
+    "defaultTheme": "light",
+    "itemsPerPage": 25
+  },
+  "deploy": {
+    "generateJsonInCI": true,
+    "ciPrepareScript": "npm run ci:prepare"
+  },
+  "archive": {
+    "path": "archive",
+    "keepDays": 90
+  }
+}

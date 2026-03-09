@@ -1,0 +1,35 @@
+{
+  "autoRefresh": true,
+  "refreshInterval": 300000,
+  "useParametricMode": true,
+  "weights": {
+    "resolutionRate": 0.3,
+    "testCoverage": 0.25,
+    "bugDensity": 0.2,
+    "criticalBugs": 0.25
+  },
+  "thresholds": {
+    "criticalBugsAlert": 20,
+    "maxBugsDeveloper": 15,
+    "criticalModulePercentage": 60,
+    "minTestCoverage": 80,
+    "maxBugTrendIncrease": 20
+  },
+  "priorities": {
+    "critical": ["Más alta", "Alta"],
+    "high": ["Media"],
+    "low": ["Baja", "Más baja"]
+  },
+  "modules": {
+    "POS": { "weight": 0.4, "criticalThreshold": 50 },
+    "Inventory": { "weight": 0.3, "criticalThreshold": 40 },
+    "Reports": { "weight": 0.2, "criticalThreshold": 30 },
+    "Admin": { "weight": 0.1, "criticalThreshold": 20 }
+  },
+  "alertSettings": {
+    "enableEmailNotifications": true,
+    "enableSlackNotifications": true,
+    "criticalAlertCooldown": 3600,
+    "warningAlertCooldown": 7200
+  }
+}
