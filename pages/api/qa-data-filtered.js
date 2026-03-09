@@ -1,6 +1,7 @@
 // pages/api/qa-data-filtered.js
 // Unified filtered data endpoint: supports product, priority, and status filters
 import DAL from '../../lib/database/dal.js';
+import { getQADataFromJson } from '../../lib/jsonDataLoader.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
@@ -92,7 +93,25 @@ export default async function handler(req, res) {
       _dataSource:      'sqlite',
     });
   } catch (error) {
-    console.error('[qa-data-filtered] Error:', error);
-    return res.status(500).json({ error: error.message });
+    console.error('[qa-data-filtered] Database error:', error.message);
+    // Fallback to JSON data when database unavailable
+    try {
+      const fallbackData = getQADataFromJson();
+      if (fallbackData) {
+        return res.status(200).json({
+          bugsByMonth: fallbackData.bugsByMonth || {},
+          testCasesByMonth: fallbackData.testCasesByMonth || {},
+          bugsByPriority: fallbackData.bugsByPriority || {},
+          summary: fallbackData.summary || fallbackData || { totalBugs: 0 },
+          resolutionTimeData: fallbackData.resolutionTimeData || null,
+          _dataSource: 'json-fallback',
+          _note: 'Filtered data not available; returning unfiltered data from JSON fallback',
+        });
+      }
+    } catch (fallbackErr) {
+      console.error('[qa-data-filtered] Fallback error:', fallbackErr.message);
+    }
+    
+    return res.status(500).json({ error: 'No data available' });
   }
 }

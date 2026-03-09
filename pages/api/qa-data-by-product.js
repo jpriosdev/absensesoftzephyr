@@ -1,6 +1,7 @@
 // pages/api/qa-data-by-product.js
 // Returns bugsByMonth + testCasesByMonth + summary filtered by a specific tag0/product
 import DAL from '../../lib/database/dal.js';
+import { getQADataFromJson } from '../../lib/jsonDataLoader.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
@@ -62,7 +63,25 @@ export default async function handler(req, res) {
       _dataSource: 'sqlite',
     });
   } catch (error) {
-    console.error('[qa-data-by-product] Error:', error);
-    return res.status(500).json({ error: error.message });
+    console.error('[qa-data-by-product] Database error:', error.message);
+    // Fallback to JSON data when database unavailable
+    try {
+      const fallbackData = getQADataFromJson();
+      if (fallbackData) {
+        return res.status(200).json({
+          product,
+          bugsByMonth: fallbackData.bugsByMonth || {},
+          testCasesByMonth: fallbackData.testCasesByMonth || {},
+          summary: fallbackData.summary || { totalBugs: 0 },
+          resolutionTimeData: fallbackData.resolutionTimeData || null,
+          _dataSource: 'json-fallback',
+          _note: 'Product-specific data not available; returning unfiltered data from JSON fallback',
+        });
+      }
+    } catch (fallbackErr) {
+      console.error('[qa-data-by-product] Fallback error:', fallbackErr.message);
+    }
+
+    return res.status(500).json({ error: 'No data available' });
   }
 }
