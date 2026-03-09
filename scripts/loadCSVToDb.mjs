@@ -60,8 +60,9 @@ const db = new (sqlite3.verbose().Database)(DB_PATH, (err) => {
     const stmt = db.prepare(`
       INSERT INTO bugs_detail (
         tipo_incidencia, clave_incidencia, id_incidencia, resumen, prioridad, 
-        estado, sprint, modulo, categoria, asignado_a, fecha_reporte
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        estado, sprint, modulo, categoria, asignado_a, fecha_reporte,
+        tipo_prueba, atributo, nivel_prueba, tag0, ambiente, reportado_por
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     let insertedCount = 0;
@@ -81,6 +82,12 @@ const db = new (sqlite3.verbose().Database)(DB_PATH, (err) => {
           row['Categoría'] || '',
           row['Desarrollador'] || '',
           row['Fecha Reporte'] || '',
+          row['Tipo de prueba'] || '',
+          row['Atributo'] || '',
+          row['Nivel de prueba'] || '',
+          row['Tag0'] || '',
+          row['Ambiente'] || '',
+          row['Reportado'] || '',
         ], function(err) {
           if (err) {
             if (idx < 3) console.warn(`⚠️ Fila ${idx}: ${err.message}`);

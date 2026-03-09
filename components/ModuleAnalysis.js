@@ -5,7 +5,7 @@ import { Package, AlertTriangle, CheckCircle, TrendingUp } from 'lucide-react';
  * Detailed analysis of bugs, efficiency and risk by system modules.
  * Alineado con nueva estructura SQL/CSV, validación segura de datos.
  */
-export default function ModuleAnalysis({ data }) {
+export default function ModuleAnalysis({ data, tag0Filter = '' }) {
   // Validación robusta de datos
   if (!data || typeof data !== 'object' || Object.keys(data).length === 0) {
     return (

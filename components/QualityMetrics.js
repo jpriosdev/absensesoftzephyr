@@ -13,7 +13,7 @@ import {
 import UnderConstructionCard from './UnderConstructionCard';
 import KPICard from './KPICard';
 
-  export default function QualityMetrics({ data, visibleKeys, sprintData = [], onOpenDetail,
+  export default function QualityMetrics({ data, visibleKeys, sprintData = [], tag0Filter = '', onOpenDetail,
     sprintListProp, selectedSprintsProp, onSprintToggleProp, showFiltersProp
   }) {
       // Sprint list and selection for filtering

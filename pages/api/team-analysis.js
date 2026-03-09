@@ -22,6 +22,9 @@ function getSingle(db, sql, params = []) {
 }
 
 export default async function handler(req, res) {
+  const { tag0 = '' } = req.query;
+  const tag0Filter = tag0.trim();
+
   const db = new sqlite3.Database(dbPath, sqlite3.OPEN_READONLY, (err) => {
     if (err) {
       console.error('DB open error', err && err.message);
@@ -29,6 +32,10 @@ export default async function handler(req, res) {
   });
 
   try {
+    // Build WHERE clause for tag0 filter
+    const whereTag0 = tag0Filter ? ' AND tag0 = ?' : '';
+    const params = tag0Filter ? [tag0Filter] : [];
+
     // Summary
     const summary = await getSingle(db, `
       SELECT 
@@ -37,18 +44,18 @@ export default async function handler(req, res) {
         SUM(CASE WHEN estado = 'Tareas por hacer' THEN 1 ELSE 0 END) as total_pending,
         SUM(CASE WHEN prioridad IN ('Más alta', 'Alta') THEN 1 ELSE 0 END) as total_critical
       FROM bugs_detail
-      WHERE LOWER(tipo_incidencia) = 'bug'
-    `);
+      WHERE LOWER(tipo_incidencia) = 'bug'${whereTag0}
+    `, params);
 
     // Top 5 developers
     const topDevs = await runQuery(db, `
       SELECT asignado_a as developer, COUNT(*) as total
       FROM bugs_detail
-      WHERE LOWER(tipo_incidencia) = 'bug'
+      WHERE LOWER(tipo_incidencia) = 'bug'${whereTag0}
       GROUP BY asignado_a
       ORDER BY total DESC
       LIMIT 5
-    `);
+    `, params);
 
     // Developer summaries (total / resolved / pending)
     const developerSummaries = await runQuery(db, `
@@ -58,10 +65,10 @@ export default async function handler(req, res) {
         SUM(CASE WHEN estado IN ('Done','Resolved','Closed') THEN 1 ELSE 0 END) as resolved,
         SUM(CASE WHEN estado NOT IN ('Done','Resolved','Closed') THEN 1 ELSE 0 END) as pending
       FROM bugs_detail
-      WHERE LOWER(tipo_incidencia) = 'bug'
+      WHERE LOWER(tipo_incidencia) = 'bug'${whereTag0}
       GROUP BY asignado_a
       ORDER BY total DESC
-    `);
+    `, params);
 
     // Assigned vs unassigned
     const assignment = await getSingle(db, `
@@ -69,8 +76,8 @@ export default async function handler(req, res) {
         SUM(CASE WHEN asignado_a IS NOT NULL AND asignado_a != '' THEN 1 ELSE 0 END) as assigned_bugs,
         SUM(CASE WHEN asignado_a IS NULL OR asignado_a = '' THEN 1 ELSE 0 END) as unassigned_bugs
       FROM bugs_detail
-      WHERE LOWER(tipo_incidencia) = 'bug'
-    `);
+      WHERE LOWER(tipo_incidencia) = 'bug'${whereTag0}
+    `, params);
 
     // Distinct statuses
     const statuses = await runQuery(db, `SELECT DISTINCT estado as status FROM bugs_detail ORDER BY estado`);
