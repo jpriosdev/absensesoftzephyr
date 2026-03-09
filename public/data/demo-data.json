@@ -65,10 +65,10 @@
     { "name": "Tester D", "assigned": 16, "resolved": 15, "pending": 1 }
   ],
   "testerData": [
-    { "tester": "Reporter A", "reportado": "Reporter A", "total_bugs": 28, "passed": 26, "failed": 2, "not_executed": 0, "in_progress": 0, "blocked": 0, "sprints_involved": 3 },
-    { "tester": "Reporter B", "reportado": "Reporter B", "total_bugs": 35, "passed": 32, "failed": 3, "not_executed": 0, "in_progress": 0, "blocked": 0, "sprints_involved": 4 },
-    { "tester": "Reporter C", "reportado": "Reporter C", "total_bugs": 22, "passed": 20, "failed": 2, "not_executed": 0, "in_progress": 0, "blocked": 0, "sprints_involved": 2 },
-    { "tester": "Reporter D", "reportado": "Reporter D", "total_bugs": 30, "passed": 28, "failed": 2, "not_executed": 0, "in_progress": 0, "blocked": 0, "sprints_involved": 3 }
+    { "tester": "Reporter A", "reportado": "Reporter A", "products": ["Authentication", "Dashboard"], "total_bugs": 28, "passed": 26, "failed": 2, "not_executed": 0, "in_progress": 0, "blocked": 0, "sprints_involved": 3 },
+    { "tester": "Reporter B", "reportado": "Reporter B", "products": ["Reports", "Integration"], "total_bugs": 35, "passed": 32, "failed": 3, "not_executed": 0, "in_progress": 0, "blocked": 0, "sprints_involved": 4 },
+    { "tester": "Reporter C", "reportado": "Reporter C", "products": ["API", "Dashboard"], "total_bugs": 22, "passed": 20, "failed": 2, "not_executed": 0, "in_progress": 0, "blocked": 0, "sprints_involved": 2 },
+    { "tester": "Reporter D", "reportado": "Reporter D", "products": ["Authentication", "Reports", "API"], "total_bugs": 30, "passed": 28, "failed": 2, "not_executed": 0, "in_progress": 0, "blocked": 0, "sprints_involved": 3 }
   ],
   "bugsByMonth": {
     "01-2026": { "count": 12, "critical": 3, "pending": 1 },
