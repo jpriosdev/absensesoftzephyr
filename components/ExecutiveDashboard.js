@@ -674,7 +674,7 @@ export default function ExecutiveDashboard({
       <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
         {/* ===== Date Range Filter Bar ===== */}
         {availableMonths.length > 0 && (
-          <div className="flex flex-wrap items-center gap-3 mb-5 bg-white/70 backdrop-blur-sm rounded-xl px-4 py-3 shadow-sm border" style={{ borderColor: '#e0e0e0' }}>
+          <div className="flex flex-wrap items-start gap-3 mb-8 bg-white/70 backdrop-blur-sm rounded-xl px-4 py-4 shadow-sm border" style={{ borderColor: '#e0e0e0' }}>
             <div className="flex items-center gap-2 text-sm font-semibold text-gray-600">
               <Calendar className="w-4 h-4" style={{ color: '#754bde' }} />
               <span>Period</span>
@@ -885,6 +885,7 @@ export default function ExecutiveDashboard({
           {activeTab === 'overview' && (
             <OverviewTab
               data={filteredData}
+              tag0Filter={tag0Filter}
               recommendations={recommendations}
               config={config}
               setDetailModal={setDetailModal}
@@ -897,7 +898,7 @@ export default function ExecutiveDashboard({
               setOpenResolutionModal={setOpenResolutionModal}
             />
           )}
-          {activeTab === 'quality' && <QualityTab data={filteredData} config={config} setDetailModal={setDetailModal} />}
+          {activeTab === 'quality' && <QualityTab data={filteredData} tag0Filter={tag0Filter} config={config} setDetailModal={setDetailModal} />}
           {activeTab === 'teams' && <TeamAnalysis data={filteredData} tag0Filter={tag0Filter} dateFilter={dateFilter} priorityFilter={priorityFilter} statusFilter={statusFilter} testTypeFilter={testTypeFilter} attributeFilter={attributeFilter} testLevelFilter={testLevelFilter} ambienteFilter={ambienteFilter} setDetailModal={setDetailModal} />}
           {/* trends tab removed */}
           {activeTab === 'roadmap' && (
@@ -920,7 +921,8 @@ export default function ExecutiveDashboard({
 // ===============================
 
 function OverviewTab({ 
-  data, 
+  data,
+  tag0Filter = '',
   recommendations, 
   config, 
   setDetailModal, 
@@ -1540,12 +1542,12 @@ function OverviewTab({
           <h3 className="text-lg font-semibold text-gray-900 mb-4">
             Module Analysis
           </h3>
-          <ModuleAnalysis data={moduleData} />
+          <ModuleAnalysis data={moduleData} tag0Filter={tag0Filter} />
         </div>
       )}
 
       {/* Actionable Recommendations */}
-      <ActionableRecommendations data={data} filteredSprintData={sprintData} />
+      <ActionableRecommendations data={data} filteredSprintData={sprintData} tag0Filter={tag0Filter} />
 
       {/* Modal de detalles */}
       <DetailModal 
@@ -1567,7 +1569,7 @@ function OverviewTab({
 }
 
 // Mantén las otras funciones de tabs exactamente como las tienes...
-function QualityTab({ data, config, setDetailModal }) {
+function QualityTab({ data, tag0Filter, config, setDetailModal }) {
   const { 
     kpis = {}, 
     qualityMetrics = {}, 
@@ -1590,6 +1592,7 @@ function QualityTab({ data, config, setDetailModal }) {
         data={{ ...kpis, ...qualityMetrics, summary: summary }} 
         visibleKeys={visible} 
         sprintData={sprintData}
+        tag0Filter={tag0Filter}
         onOpenDetail={setDetailModal}
       />
       

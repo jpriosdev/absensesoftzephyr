@@ -16,6 +16,7 @@
         "ci:prepare": "npm run db:migrate && npm run generate-json"
     },
     "dependencies": {
+        "better-sqlite3": "^12.6.2",
         "chart.js": "^4.4.0",
         "critters": "^0.0.22",
         "csv-parse": "^6.1.0",

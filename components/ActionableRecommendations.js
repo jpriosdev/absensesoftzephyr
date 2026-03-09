@@ -10,8 +10,9 @@ import { Lightbulb, AlertTriangle, TrendingUp, CheckCircle, Target, Users, Code,
  * @param {Object} props
  * @param {Object} props.data - Datos globales del dashboard
  * @param {Array} props.filteredSprintData - Array de datos de sprints filtrados
+ * @param {String} props.tag0Filter - Filter by product/tag0
  */
-export default function ActionableRecommendations({ data, filteredSprintData }) {
+export default function ActionableRecommendations({ data, filteredSprintData, tag0Filter = '' }) {
   // Normalize filteredSprintData to accept array or object shapes
   const sprintsArray = Array.isArray(filteredSprintData)
     ? filteredSprintData
