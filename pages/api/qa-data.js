@@ -21,16 +21,12 @@ export default async function handler(req, res) {
       console.warn('Unable to stringify sprintData for debug logging', e && e.message);
     }
 
-    // Agregar info de debugging en la respuesta
-    const response = {
-      ...qaData,
-      _debug: {
-        timestamp: new Date().toISOString(),
-        dataSource: qaData._dataSource,
-        isRealData: qaData._isRealData,
-        sprintCount: qaData.sprintData?.length || 0,
-      }
-    };
+    if (qaData.metadata) {
+      response._metadata = {
+        source: qaData.metadata.source,  // 'sqlite' o 'demo-data'
+        generatedAt: qaData.metadata.generatedAt,
+      };
+    }
     
     return res.status(200).json(response);
   } catch (error) {
